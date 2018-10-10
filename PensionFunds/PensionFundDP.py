@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
+import pandas as pd
 
 from statsmodels.distributions.empirical_distribution import ECDF
 def utility_function(x, G):
@@ -19,28 +20,30 @@ def utility_function(x, G):
         x (float): wealth
         G (float): target wealth
     '''
-    s1 = 5
-    s2 = 0
-    if x<=G:
-        return s1*(x-G) 
-    else:
-        return s2*(x - G)
+#    s1 = 10
+#    s2 = 1
 #    if x<=G:
-#        return s*(x/G)-2
+#        return s1*(x-G) 
 #    else:
-#        return x/G + 1-s
+#        return s2*(x - G)
     
+    
+    u_gamma = 0.2
+    return (x/G)**u_gamma
+#    exp_param = -0.00005
+#    numerator = 101
+#    denominator = 100
+#    return numerator/(denominator+np.exp(exp_param*(x-G)))
+   
     
 
 def w_index(w_delta, max_wealth, steps):
     def f(x):
-        if 0<=x<=max_wealth:
-            return int(np.round(x,0)/w_delta)
-        elif x>max_wealth:
-            #print(steps -1)
-            return steps -1
-        else:
-            return 0
+        p = np.round(x,0)/w_delta
+        p = np.minimum(p, steps-1)
+        p = np.maximum(p, 0)
+        p = p.astype(int)
+        return p
     return f 
     
 
@@ -77,7 +80,7 @@ def backward_induction(T, G , df, rf, r, I, c , steps):
             arg_max = None
             V_s = -np.inf
             for a in A:
-                s_a_i = [w_map((s)*(1+r[a][i])+c*I_t)  for i in range(len(r[a]))]
+                s_a_i = w_map((s)*(1+r[a])+c*I_t)
                 v_a = df*(1/len(r[a]))*sum(V[t+1,x] for x in s_a_i) #Expectation
                 if v_a>=V_s: #Choose less risk of alternative optima
                     V_s = v_a
@@ -105,7 +108,28 @@ def simulation(T,U,w_map,r,I0,c, replications, fix_policy=None):
     print('Policy: ' , fix_policy, ' Unmet_frac:' , unmet_fraction , ' CVAR:' , G-np.mean(wealths[wealths <= G]))
     return wealth_sims
 
-def plot_simulation(sim_results, style): 
+def gen_yearly_returns(Funds, monthly_returns, n_years):
+    '''
+    n_years(int): Number of returns to generate
+    '''
+    n_months = len(monthly_returns[Funds[0]])
+    yearly_returns = {f:[] for f in Funds}
+    for i in range(n_years):
+        initial_month = np.random.randint(n_months) 
+        months = list(range(initial_month, initial_month+12))
+        if initial_month > n_months - 12:
+            for k in range(12):
+                if months[k] >= n_months:
+                    months[k] -= n_months
+        for a in Funds:
+            r_a = 1+(monthly_returns[a][months]/100)
+            y_r_a = np.product(r_a) - 1
+            yearly_returns[a].append(y_r_a)
+    for a in Funds:   
+        yearly_returns[a] = np.array(yearly_returns[a])
+    return yearly_returns
+
+def plot_simulation(sim_results, policy, style): 
     if style ==0 :
         fig, ax = plt.subplots()
         cols = cm.rainbow(np.linspace(0, 1, len(sim_results)))
@@ -186,6 +210,43 @@ def plot_policy(T, S, w_map, policy, Funds, G):
     ax.set_ylabel('Wealth ($USD)')
     plt.tight_layout()
     plt.show()
+    
+def plot_policy_and_sim(T, S, w_map, policy, Funds, G, sim_results):
+    F = {a:i for (i,a) in enumerate(Funds)}
+    U_plot = np.array([[F[policy[t,w_map(s)]] for t in range(T)] for s in S if s<=G*1.5])
+    U_plot[w_map(G)-6:w_map(G)+6,:] = -1 #Draw G
+    #Draw simulation 5-95%
+    U_plot2 = np.copy(U_plot)
+    for t in range(T):
+        r_t = np.array([sim[t] for sim in sim_results])
+        r_t.sort()
+        w_5 = r_t[int(len(r_t)*0.05)]
+        w_95 = r_t[int(len(r_t)*0.95)]
+        U_plot2[w_map(w_5):w_map(w_95),t] = -1
+        #U_plot2[w_map(w_95)-10:w_map(w_95),t] = -1
+        
+
+    cmap = colors.ListedColormap(['black', 'red', 'blue','green', 'orange', 'yellow' ])
+    fig, ax = plt.subplots()
+    steps_displayed = len(U_plot)
+    im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(Funds)-1)
+    im2 = ax.imshow(U_plot2, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(Funds)-1, alpha=0.3)
+    
+    # We want to show all ticks...
+    ax.set_xticks(np.arange(0,T+1,5))
+    y_ticks = np.arange(0,steps_displayed,int(steps_displayed/10))
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(S[y_ticks])
+    # colormap used by imshow
+    values = [F[a] for a in Funds]
+    cols = [ im.cmap(im.norm(value)) for value in values]
+    patches = [ mpatches.Patch(color=cols[i], label="Fund {l}".format(l=Funds[values[i]]) ) for i in range(len(values)) ]
+    ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0. )
+    ax.set_xlabel('Years')
+    ax.set_ylabel('Wealth ($USD)')
+    plt.tight_layout()
+    plt.show()
+    
 #    show_steps = int(steps/2)
 #    X = {}
 #    Y = {}
@@ -208,11 +269,11 @@ def plot_policy(T, S, w_map, policy, Funds, G):
 
 if __name__ == '__main__':
     T = 40 
-    R = 20
-    df = 0.98
-    rf = (1/df)-1
+    R = 18
+    rf = 0.02
+    df = 1/(1+rf)
     I0 = 10000
-    c = 0.1
+    c = 0.10
     I_star = np.round(I0*((1+rf)**40))
     w = 2/3
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
@@ -220,40 +281,45 @@ if __name__ == '__main__':
     df = 0.98
     steps = 5001
     #returns
-    r = {'a': [0.2,0.17,0.08,0.175,0.13,-0.15,0.1,0.02,-0.2,-0.25,0.28] , \
-         'b':[0.055,0.11,0.06,0.07,0.08,-0.05,0.01,0.01,0.12,-0.03,-0.05,0.12], \
-         'c':[0.06,0.08,0.02,0.023,0.023,0.01,0.01,0.12,0.03,0.05,0.012], \
-         'd':[0.05,0.01,0.02,0.02,0.01,0.01,0.01,0.012,0.03,0.05,0.012], \
-         'e':[0.03,0.00,0.01,0.01,0.01,0.01,0.01,0.012,0.03,0.01,0.02], \
-         }
+    
+    file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
+    returns_cl  = pd.read_excel(file_returns, skiprows = 2)
+    returns_cl =  returns_cl.dropna() 
+    
+    Funds = ['A','B','C','D','E']
+    monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]) for f in Funds}
+    r = gen_yearly_returns(Funds, monthly_returns,  n_years=100)
+    
     Funds = list(r.keys())
     Funds.sort()
     print([np.mean(r[a]) for a in Funds])
     print([np.std(r[a]) for a in Funds])
     V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps)
     
-    def_pol = {(t,w_map(s)):('b' if t<=14 else ('c' if 14<t<=27 else 'd')) for t in range(T) for s in S}
+    def_pol = {(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=27 else 'D')) for t in range(T) for s in S}
     
     print(V[0,0])
 
     
-    plot_policy(T, S, w_map, U,  Funds ,G)
+    plot_policy(T ,S, w_map, U, Funds, G)
     plot_policy(T ,S, w_map, def_pol, Funds, G)
     
     
     
     
-    replicas = 100
+    replicas = 10000
     simulated_returns = {}
     for k in range(replicas):
         for t in range(T):
-            r_index = np.random.randint(0,len(r['a']))
+            r_index = np.random.randint(0,len(r['A']))
             for a in Funds:
                 simulated_returns[k,t,a] = r[a][r_index]
     
     
     DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas)
-    plot_simulation(DP_sim_results, style=0)
+    plot_simulation(DP_sim_results, U, style=0)
+    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results )
+    
     
     Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas)
     plot_simulation(Default_sim_results, style=0)
@@ -266,3 +332,8 @@ if __name__ == '__main__':
 #        plot_simulation(sim_results, style=0)
 #    
     
+    
+    fig, ax = plt.subplots()
+    heights,bins = np.histogram(rA,bins=20)
+    heights = heights/sum(heights)
+    ax.bar(bins[:-1],heights,width=(max(bins) - min(bins))/len(bins), color="red", alpha=0.6 , label='rA')
