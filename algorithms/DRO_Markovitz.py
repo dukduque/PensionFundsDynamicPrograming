@@ -123,7 +123,7 @@ def test_porfolio(portfolio, data_test, steps, replicas):
 
 if __name__ == '__main__':
     
-    assets = pd.read_excel('../data/bancolombia/Consolidado.xlsx', sheet_name='asset_daily_returns')
+    assets = pd.read_excel('./data/bancolombia/Consolidado.xlsx', sheet_name='asset_daily_returns')
     assets = assets.dropna() 
     data_train = np.array(assets.iloc[365:,1:])
     data_test = np.array(assets.iloc[:,1:])

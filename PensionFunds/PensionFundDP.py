@@ -8,12 +8,14 @@ Created on Wed Oct  3 12:16:05 2018
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import colors
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
 import pandas as pd
+from matplotlib import colors
+from PensionFunds.NORTA import fit_NORTA, NORTA
 
 from statsmodels.distributions.empirical_distribution import ECDF
+
 def utility_function(x, G):
     '''
     params:
@@ -28,12 +30,12 @@ def utility_function(x, G):
 #        return s2*(x - G)
     
     
-    u_gamma = 0.2
-    return (x/G)**u_gamma
-#    exp_param = -0.00005
-#    numerator = 101
-#    denominator = 100
-#    return numerator/(denominator+np.exp(exp_param*(x-G)))
+#    u_gamma = 0.2
+#    return (x/G)**u_gamma
+    exp_param = -0.1
+    numerator = 101
+    denominator = 100
+    return numerator/(denominator+np.exp((x-G)/(exp_param*G)))
    
     
 
@@ -55,7 +57,7 @@ def backward_induction(T, G , df, rf, r, I, c , steps):
     assert df<1
     max_wealth = np.round(3*G,-3) - (np.round(3*G,-3) % (steps-1))
     w_delta = int(max_wealth/(steps-1)) 
-    V = {}
+    V = np.zeros((T+1,steps))
     U = {}
     
     
@@ -68,8 +70,7 @@ def backward_induction(T, G , df, rf, r, I, c , steps):
         assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
     
     # Value in the last stage
-    for w in S:
-        V[T,w_map(w)] = utility_function(w,G) 
+    V[T,:] = utility_function(S,G) 
     
     for t in np.arange(T-1, -1, -1):
         I_t = I*(1+rf)**t
@@ -105,7 +106,9 @@ def simulation(T,U,w_map,r,I0,c, replications, fix_policy=None):
         fix_policy = 'DP'
     wealths = np.array([sr[-1] for sr in wealth_sims])
     unmet_fraction = wealths[wealths <= G].size / wealths.size
-    print('Policy: ' , fix_policy, ' Unmet_frac:' , unmet_fraction , ' CVAR:' , G-np.mean(wealths[wealths <= G]))
+    print('Policy: ' , fix_policy, ' Unmet_frac:' , unmet_fraction , \
+          ' Short:' , G-np.mean(wealths[wealths <= G]), ' EV: ' ,np.mean(wealths),\
+          ' SD: ' ,np.std(wealths))
     return wealth_sims
 
 def gen_yearly_returns(Funds, monthly_returns, n_years):
@@ -122,7 +125,7 @@ def gen_yearly_returns(Funds, monthly_returns, n_years):
                 if months[k] >= n_months:
                     months[k] -= n_months
         for a in Funds:
-            r_a = 1+(monthly_returns[a][months]/100)
+            r_a = 1+monthly_returns[a][months]
             y_r_a = np.product(r_a) - 1
             yearly_returns[a].append(y_r_a)
     for a in Funds:   
@@ -273,7 +276,7 @@ if __name__ == '__main__':
     rf = 0.02
     df = 1/(1+rf)
     I0 = 10000
-    c = 0.10
+    c = 0.15
     I_star = np.round(I0*((1+rf)**40))
     w = 2/3
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
@@ -287,8 +290,13 @@ if __name__ == '__main__':
     returns_cl =  returns_cl.dropna() 
     
     Funds = ['A','B','C','D','E']
-    monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]) for f in Funds}
-    r = gen_yearly_returns(Funds, monthly_returns,  n_years=100)
+    #monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds}
+    
+    #data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]) for f in Funds]).transpose()
+    #norta_data = fit_NORTA(data,len(data),len(data[0]))
+    NG = norta_data.gen(1000000)
+    monthly_returns = {f:NG[:,i]/100 for (i,f) in enumerate(Funds)}
+    r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
     
     Funds = list(r.keys())
     Funds.sort()
@@ -296,7 +304,7 @@ if __name__ == '__main__':
     print([np.std(r[a]) for a in Funds])
     V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps)
     
-    def_pol = {(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=27 else 'D')) for t in range(T) for s in S}
+    def_pol = {(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=34 else 'D')) for t in range(T) for s in S}
     
     print(V[0,0])
 
@@ -322,7 +330,8 @@ if __name__ == '__main__':
     
     
     Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas)
-    plot_simulation(Default_sim_results, style=0)
+    plot_simulation(Default_sim_results, def_pol, style=0)
+    plot_policy_and_sim(T ,S, w_map,  def_pol, Funds, G, Default_sim_results )
     
     plot_policies_comparizon(('DP Policy', DP_sim_results),  ('Default', Default_sim_results), G)
     
