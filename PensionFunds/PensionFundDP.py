@@ -82,7 +82,7 @@ def backward_induction(T, G , df, rf, r, I, c , steps):
             V_s = -np.inf
             for a in A:
                 s_a_i = w_map((s)*(1+r[a])+c*I_t)
-                v_a = df*(1/len(r[a]))*sum(V[t+1,x] for x in s_a_i) #Expectation
+                v_a = df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
                 if v_a>=V_s: #Choose less risk of alternative optima
                     V_s = v_a
                     arg_max = a
