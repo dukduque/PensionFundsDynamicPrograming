@@ -235,7 +235,7 @@ if __name__ == "__main__":
     n = len(data)
     d = len(data[0])
     norta_data = fit_NORTA(data,n,d)
-    NG = norta_data.gen(1000000)
+    NG = norta_data.gen(1000)
     print(NG.mean(axis=0), data.mean(axis=0))
     print(np.corrcoef(NG,rowvar=0))
     print(np.corrcoef(data,rowvar=0))
