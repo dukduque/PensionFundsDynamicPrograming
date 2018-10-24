@@ -21,7 +21,8 @@ OUTPUT = 1 #Output flag. 0: no output, 1: process output
 MC_SAMPLES = 10000000 #Number of samples to compute the integral
 
 def reset_stream():
-    rnd.seed(0)
+    global rnd
+    rnd  = np.random.RandomState(0) #Random stream
 
 
 def find_rho_z(i,j,F_invs, CovX, EX):
@@ -202,7 +203,7 @@ class NORTA():
         assert len(Finv) == len(C), 'Dimension of the marginals and C dont match.'
         self.F_inv = Finv
         self.C = C
-        
+        reset_stream()
     
     
     def gen(self, n = 1):
