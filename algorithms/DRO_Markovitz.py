@@ -135,7 +135,9 @@ if __name__ == '__main__':
     
     print('%12s %10s %10s %10s' %('Max CVaR', 'return',  'SD', 'CVaR_0.05'))
     sols_risk_threshold = {}
-    for exponent in np.arange(-5,-3):
+    r_risk1 = []
+    sd_risk1 = []
+    for exponent in np.arange(-5,-1):
         for b in np.arange(1,9):
     #y_cvars = [0.1,0.08,0.07,0.06,0.05,0.04,0.03,0.02,0.01,0,-0.01,-0.02,-0.03]
     #for risk_param in [-1+(1+ycvar)**(1/365.0) for ycvar in y_cvars]:
@@ -148,9 +150,15 @@ if __name__ == '__main__':
             
             test_return, test_SD, cvar = test_porfolio(x_sol, data_train, 2*365, 1000)
             print('%12.4f %10.4f %10.4f %10.4f' %(-1+(1+risk_param)**365, test_return,  test_SD, cvar))
-    
-    raise 'stop'
+            r_risk1.append(test_return)
+            sd_risk1.append(test_SD)
+    sd_risk = np.array(sd_risk)
+    plt.plot(sd_risk, r_risk)
+    plt.plot(sd_risk**2, r_risk)
+    #raise 'stop'
     sols_delta = {}
+    r_risk = []
+    sd_risk = []
     print('%12s %10s %10s %10s' %('delta', 'return',  'SD', 'CVaR_0.05'))
     #Solution for delta  = 0 
     x_sol, p_mean, p_var = markovitz_dro_wasserstein(data_train,0,alpha_param,1)
@@ -165,12 +173,14 @@ if __name__ == '__main__':
             
             x_sol, p_mean, p_var = markovitz_dro_wasserstein(data_train,delta_param,alpha_param,1)
             sols_delta[delta_param] = x_sol
+            
             p_mean_annual = -1 + (1+p_mean)**(365)
             #print('R, SD: %10.4f, %10.4f' %(p_mean_annual,  np.sqrt(m*p_var)))
             
             test_return, test_SD, cvar = test_porfolio(x_sol, data_test, 2*365, 1000)
             print('%12.5e %10.4f %10.4f %10.4f' %(delta_param, test_return,  test_SD, cvar))
-            
+            r_risk.append(test_return)
+            sd_risk.append(test_SD)
 #            for j in range(len(x_sol)):
 #                print('%30s %10.5f' %(assets.columns[j+1],x_sol[j]))
     

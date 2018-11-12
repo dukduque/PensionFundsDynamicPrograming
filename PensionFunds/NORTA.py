@@ -13,6 +13,7 @@ Cario and Nelson (2007).
 import numpy as np
 from scipy.linalg import cholesky
 import scipy.stats as stats
+from fitter import Fitter
 
 rnd  = np.random.RandomState(0) #Random stream
 Z = stats.norm(0,1)   #Standar normal
@@ -119,7 +120,6 @@ def conv_exp(covZ, F_i_inv, F_j_inv, gaussian_sampling=True):
             return F_i_inv(Z.cdf(z1))*F_j_inv(Z.cdf(z2)) # remove bi_x pdf since montecarlo is sampling according to  bi_z
         return f
     else:
-        print('hola')
         bi_z = stats.multivariate_normal(cov=covZ)
         def f(z1,z2):
             z1z2 = np.vstack((z1,z2)).transpose()

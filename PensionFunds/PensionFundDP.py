@@ -11,12 +11,14 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
 import scipy.stats
+import scipy.stats as st
 import pandas as pd
 import pickle
 from matplotlib import colors
 from PensionFunds.NORTA import fit_NORTA, NORTA, build_empirical_inverse_cdf
-
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.distributions.empirical_distribution import ECDF
+from fitter import Fitter
 
 def utility_function(x, G):
     '''
@@ -41,7 +43,7 @@ def utility_function(x, G):
     left = numerator/(denominator+np.exp((x-G)/(exp_param*G)))
     right = np.exp((x-G)/G)
     return left#side_g*left + (1-side_g)*right
-   
+ 
     
 
 def w_index(w_delta, max_wealth, steps):
@@ -104,6 +106,71 @@ def backward_induction(T, G , df, rf, r, I, c , steps, cvar = False):
             V[t,s_index] = V_s
             U[t,s_index] = arg_max    
     return V,U,S,w_map
+
+
+def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
+    '''
+    Runs backward induction to find the optimal policy of selecting 
+    a fund at each time period give a particular amounth of wealth.
+    Stochastic domiance variant
+    
+    Y (ndarray): realizations of the benchmark
+    '''
+    assert df<1
+    max_wealth = np.round(3*G,-3) - (np.round(3*G,-3) % (steps-1))
+    w_delta = int(max_wealth/(steps-1)) 
+    V = np.zeros((T+1,steps))
+    U = {}
+    #R = np.eye(steps) #PMF of final wealth
+    
+    
+    A = r.keys()
+    w_map = w_index(w_delta, max_wealth,steps)
+    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
+    
+    for (i,s) in enumerate(S):
+        assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
+    
+    # Value in the last stage
+    V[T,:] = utility_function(S,G) 
+
+    for t in np.arange(T-1, -1, -1):
+        I_t = I*(1+rf)**t
+        #Rt= np.zeros_like(R) #PMF of final wealth at t
+        print('solving ', t, ' ' , I_t)
+        for s in S:
+            #print('s=',w_map(s), ' ', s)
+            s_index = w_map(s)
+            arg_max = None
+            V_s = -np.inf
+            #nR = None
+            for a in A:
+                v_a = None
+                if t == T-1:
+                    s_a_i = w_map((s)*(1+r[a])+c*I_t)
+                    X = S[s_a_i]
+                    XX = np.tile(X, (len(Y), 1))
+                    SSD =  np.maximum(Y - XX.transpose(), 0 )
+                    SDD_mean = SSD.mean(0)
+                    if sdd_tail:
+                        v_a = -SDD_mean[Y<G].sum()
+                    else:
+                        v_a = -SDD_mean.sum()
+                else:
+                    s_a_i = w_map((s)*(1+r[a])+c*I_t)
+                    v_a = df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
+                if v_a>=V_s: #Choose less risk of alternative optima
+                    V_s = v_a
+                    arg_max = a
+                    #nR = R[s_a_i,:].sum(0)
+                    #nR = nR/nR.sum()
+            V[t,s_index] = V_s
+            U[t,s_index] = arg_max 
+            #Rt[s_index,:] = nR
+        #R = np.copy(Rt)
+    return V,U,S,w_map
+
+
 
 def simulation(T,U,w_map,r,I0,c, replications, fix_policy=None, policy_name =""):
     np.random.seed(0)
@@ -194,13 +261,13 @@ def plot_policies_comparizon(p1_results, p2_results,G):
     
     n_pdf = 10000
     fig, ax = plt.subplots()
-    hist_dist = scipy.stats.rv_histogram((heights,bins))
+    hist_dist1 = scipy.stats.rv_histogram((heights,bins))
     X = np.linspace(wealths[0], wealths[-1], n_pdf)
-    max_p1 = np.max(hist_dist.pdf(X))
-    ax.fill_between(X,hist_dist.pdf(X),np.zeros_like(X),  alpha=0.5)
+    max_p1 = np.max(hist_dist1.pdf(X))
+    ax.fill_between(X,hist_dist1.pdf(X),np.zeros_like(X),  alpha=0.5)
     
     axR = ax.twinx()
-    axR.plot(X, hist_dist.cdf(X), label=p1_results[0])
+    axR.plot(X, hist_dist1.cdf(X), label=p1_results[0])
     
     
     wealths = [sr[-1] for sr in p2_results[1]]
@@ -216,16 +283,17 @@ def plot_policies_comparizon(p1_results, p2_results,G):
 #    axR.hist(wealths[:], bins=bins, normed=True, cumulative=True, label='CDF %s' %(p2_results[0]), histtype='step', alpha=0.8, color='red')
 #    axR.set_yticks(np.linspace(0, 1, 5))
 #    axR.set_ylim(0,1)
-    hist_dist = scipy.stats.rv_histogram((heights,bins))
+    hist_dist2 = scipy.stats.rv_histogram((heights,bins))
     X = np.linspace(wealths[0], wealths[-1], n_pdf)
-    max_p2 = np.max(hist_dist.pdf(X))
-    ax.fill_between(X,hist_dist.pdf(X),np.zeros_like(X), alpha=0.5, color='red')
-    axR.plot(X, hist_dist.cdf(X), label=p2_results[0], color='red')
+    max_p2 = np.max(hist_dist2.pdf(X))
+    ax.fill_between(X,hist_dist2.pdf(X),np.zeros_like(X), alpha=0.5, color='red')
+    axR.plot(X, hist_dist2.cdf(X), label=p2_results[0], color='red')
     
     
     ax.set_yticks(np.linspace(0, np.maximum(max_p1,max_p2), 11))
     ax.set_ylim(0,np.maximum(max_p1,max_p2))
-    ax.set_ylabel('Frecuency')
+    ax.set_xlabel('Wealth at T')
+    ax.set_ylabel('Frequency')
     ax.set_yticklabels(['%6.2e' %(num) for num in np.linspace(0, np.maximum(max_p1,max_p2), 11)])
     ax.grid('on')
     axR.set_yticks(np.linspace(0, 1, 11))
@@ -313,9 +381,35 @@ def plot_policy_and_sim(T, S, w_map, policy, Funds, G, sim_results):
 #    ax.set_ylabel('Wealth')
 #    plt.tight_layout()
 #    plt.show()
-    
-    
 
+def create_marginal_fun(best_dist, best_params):
+    dist = getattr(st, best_dist)
+    def marginal_inv(q):
+        print(dist)
+        return dist.ppf(q,*best_params)
+    return marginal_inv
+    
+def fit_returns(data):
+    '''
+    Peforms a goodness of fit test for each fund
+    Args:
+        data(ndarray):
+    '''
+    marginals = [] 
+    dist_names = []
+    candidates =['norm','gamma', 'dgamma',   'johnsonsb', 'johnsonub']
+    for j in range(len(data[0])):
+        f = Fitter(data[:,j], distributions=candidates, verbose=False)
+        f.fit()
+        best_dist = f.df_errors.sumsquare_error.idxmin()
+        print(best_dist)
+        best_parmas = f.fitted_param[best_dist]
+        marginals.append(create_marginal_fun(best_dist, best_parmas))
+    for fm in marginals:
+        print(fm(0.5))
+   
+    return marginals, dist_names
+        
 if __name__ == '__main__':
     T = 40 
     R = 18
@@ -337,43 +431,68 @@ if __name__ == '__main__':
     
     Funds = ['A','B','C','D','E']
     monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds}
+    data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]) for f in Funds]).transpose()
     
-#    data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]) for f in Funds]).transpose()
-#    #norta_data = fit_NORTA(data,len(data),len(data[0]))
-#    #pickle.dump( norta_data.C, open('./norta_obj.pickle', 'wb'), pickle.HIGHEST_PROTOCOL)
-#    norta_c_matrix = pickle.load(open('./norta_obj.pickle', 'rb'))
-#    F_invs = [build_empirical_inverse_cdf(np.sort(data[:,i])) for i in range(len(Funds))]
-#    norta_data = NORTA(F_invs ,norta_c_matrix )
-#    NG = norta_data.gen(10000)
-#    monthly_returns = {f:NG[:,i]/100 for (i,f) in enumerate(Funds)}
-    r = gen_yearly_returns(Funds, monthly_returns,  n_years=500)
+    
+    if False: #Show correlogram
+        data_df = pd.DataFrame(data=data, columns=Funds)
+        for f in data_df.columns:
+            plot_acf(data_df[f], lags=24)
+    invs_marginals, marg_names= fit_returns(data)
+    
+    norta_data = fit_NORTA(data,len(data),len(data[0]), F_invs=invs_marginals)
+    #pickle.dump( norta_data.C, open('./norta_obj.pickle', 'wb'), pickle.HIGHEST_PROTOCOL)
+    #norta_c_matrix = pickle.load(open('./norta_obj.pickle', 'rb'))
+    #F_invs = [build_empirical_inverse_cdf(np.sort(data[:,i])) for i in range(len(Funds))]
+    #F_invs = invs_marginals
+    #norta_data = NORTA(F_invs ,norta_c_matrix )
+    NG = norta_data.gen(10000)
+    monthly_returns = {f:NG[:,i]/100 for (i,f) in enumerate(Funds)}
+    r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
+    
+    #Same shapre ratio experiment
+    data_cov = np.cov(data, rowvar=False)
+    SDs = np.sqrt(np.diag(data_cov))
+    sharpe_ratio = 0.8 
+    sr_mean_returs = rf*100 + sharpe_ratio*SDs
+    norm_r = np.
+    monthly_returns = {f:norm_r[:,i]/100 for (i,f) in enumerate(Funds)}
+    r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
+    
     
     Funds = list(r.keys())
     Funds.sort()
     print([np.mean(r[a]) for a in Funds])
     print([np.std(r[a]) for a in Funds])
+    print([(np.mean(r[a])-rf)/np.std(r[a]) for a in Funds])
+  
     
     
     
     np.random.seed(0)
     replicas = 10000
     simulated_returns = {}
+    NG_sim = norta_data.gen(20000)
+    monthly_returns_sim = {f:NG_sim[:,i]/100 for (i,f) in enumerate(Funds)}
+    r_sim = gen_yearly_returns(Funds, monthly_returns_sim,  n_years=15000)
     for k in range(replicas):
         for t in range(T):
             r_index = np.random.randint(0,len(r['A']))
             for a in Funds:
-                simulated_returns[k,t,a] = r[a][r_index]
-    
-    
+                simulated_returns[k,t,a] = r_sim[a][r_index]
+ 
+        
     V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps , cvar=False)
     DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("DP utility"))
-    #plot_simulation(DP_sim_results, U, style=0)
+    #plot_simulation(DP_sim_results, U, style=1)
     plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results )
     
+       
     def_pol = {(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=34 else 'D')) for t in range(T) for s in S}
     Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %("Default"))
     #plot_simulation(Default_sim_results, def_pol, style=1)
     plot_policy_and_sim(T ,S, w_map,  def_pol, Funds, G, Default_sim_results )
+    
     
     plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
     
@@ -385,20 +504,27 @@ if __name__ == '__main__':
     plot_policies_comparizon(('Default', Default_sim_results),('DP shortfall', DP_sim_results), G)
     
     
+    
+    Y = simulation(T,def_pol,w_map,simulated_returns,I0,c, 1000, policy_name="%10s" %("Default-Benchmarck"))
+    Y =  np.array([sr[-1] for sr in Y])
+    
+    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps , Y, sdd_tail=False)
+    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("SSD"))
+    #plot_simulation(DP_sim_results, U, style=1)
+    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
+    
+    plot_policies_comparizon(('Default', Default_sim_results),('SSD', DP_sim_results), G)
+    
+    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps , Y, sdd_tail=True)
+    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("SSD-Tail))
+    #plot_simulation(DP_sim_results, U, style=1)
+    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
+    
+    plot_policies_comparizon(('Default', Default_sim_results),('SSD-Tail', DP_sim_results), G)
+    
+    
     for a in Funds:
         policy_a = {(t,w_map(s)):a for t in range(T) for s in S}
         sim_results = simulation(T,policy_a,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %(a))
         #plot_policy_and_sim(T ,S, w_map,  policy_a, Funds, G, sim_results )
         #plot_policies_comparizon(('', []),  (a, sim_results), G)
-#    
-#    fig, ax = plt.subplots()
-#    heights,bins = np.histogram(rA,bins=20)
-#    heights = heights/sum(heights)
-#    ax.bar(bins[:-1],heights,width=(max(bins) - min(bins))/len(bins), color="red", alpha=0.6 , label='rA')
-
-
-
-#fig, ax = plt.subplots()
-#heights,bins = np.histogram(r['A'],bins=30)
-#heights = heights/sum(heights)
-#ax.bar(bins[:-1],heights,width=(max(bins) - min(bins))/len(bins), color="red", alpha=0.6)
