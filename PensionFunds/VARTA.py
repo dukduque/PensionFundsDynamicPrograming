@@ -94,9 +94,8 @@ if __name__ == '__main__':
     returns_cl =  returns_cl.dropna() 
     
     Funds = ['A','B','C','D','E']
-    monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds}
+    monthly_returns = {f:1+np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds}
+    data = np.array([np.array(1+returns_cl['Fondo Tipo %s' %f]/100) for f in Funds]).transpose()
     
-    data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]) for f in Funds]).transpose()
-    
-    matrices = write_VARTA_input(data,lag=0,samples=10000)
+    matrices = write_VARTA_input(data,lag=2,samples=10000)
     print(matrices)

@@ -122,7 +122,8 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
     V = np.zeros((T+1,steps))
     U = {}
     #R = np.eye(steps) #PMF of final wealth
-    
+    var_val = 0.3
+    cvarY = cvar(-Y,var_val)
     
     A = r.keys()
     w_map = w_index(w_delta, max_wealth,steps)
@@ -132,7 +133,7 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
         assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
     
     # Value in the last stage
-    V[T,:] = utility_function(S,G) 
+    V[T,:] = S# utility_function(S,G) 
 
     for t in np.arange(T-1, -1, -1):
         I_t = I*(1+rf)**t
@@ -146,7 +147,7 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
             #nR = None
             for a in A:
                 v_a = None
-                if t == T-1:
+                if t >= T-1:
                     s_a_i = w_map((s)*(1+r[a])+c*I_t)
                     X = S[s_a_i]
                     XX = np.tile(X, (len(Y), 1))
@@ -156,6 +157,10 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
                         v_a = -SDD_mean[Y<G].sum()
                     else:
                         v_a = -SDD_mean.sum()
+#                    cvarX = cvar(-X,var_val)
+#                    v_a =df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
+#                    if cvarX > cvarY:
+#                        v_a = v_a  - 100*(cvarX-cvarY)
                 else:
                     s_a_i = w_map((s)*(1+r[a])+c*I_t)
                     v_a = df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
@@ -170,7 +175,16 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
         #R = np.copy(Rt)
     return V,U,S,w_map
 
-
+def cvar(x, alp):
+    '''
+    Computes the cvar of a given vector of obsebations
+    at a particular quantile value
+    Args:
+        x(ndarray): vector with realizations
+        alp (float): quantile at risk (0,1)
+    '''
+    var_alp=np.percentile(x, q = int(alp*100))
+    return x[x>=var_alp].mean()
 
 def simulation(T,U,w_map,r,I0,c, replications, fix_policy=None, policy_name =""):
     np.random.seed(0)
@@ -188,9 +202,13 @@ def simulation(T,U,w_map,r,I0,c, replications, fix_policy=None, policy_name ="")
         fix_policy = 'DP'
     wealths = np.array([sr[-1] for sr in wealth_sims])
     unmet_fraction = wealths[wealths <= G].size / wealths.size
-    print('Policy: ' , policy_name, ' Unmet_frac:' , unmet_fraction , \
-          ' Short:' , G-np.mean(wealths[wealths <= G]), ' EV: ' ,np.mean(wealths),\
-          ' SD: ' ,np.std(wealths))
+    p70 = 1- wealths[wealths <= 0.7*G].size / wealths.size
+    p80 = 1- wealths[wealths <= 0.8*G].size / wealths.size
+    p90 = 1- wealths[wealths <= 0.9*G].size / wealths.size
+    p95 = 1- wealths[wealths <= 0.95*G].size / wealths.size
+    print('%15s %10s %10s %10s %10s %10s %10s %10s' %('Policy', 'Mean', 'SD', '70%', '80%', '90%', '95%', 'E.Shortfal' ))
+    print('%15s %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f' %(policy_name, np.mean(wealths), np.std(wealths), p70, p80, p90, p95, (G-np.mean(wealths[wealths <= G]))))
+    
     return wealth_sims
 
 def gen_yearly_returns(Funds, monthly_returns, n_years):
@@ -331,7 +349,7 @@ def plot_policy(T, S, w_map, policy, Funds, G):
 def plot_policy_and_sim(T, S, w_map, policy, Funds, G, sim_results):
     F = {a:i for (i,a) in enumerate(Funds)}
     U_plot = np.array([[F[policy[t,w_map(s)]] for t in range(T)] for s in S if s<=G*1.5])
-    U_plot[w_map(G)-6:w_map(G)+6,:] = -1 #Draw G
+    U_plot[w_map(G)-10:w_map(G)+10,:] = -1 #Draw G
     #Draw simulation 5-95%
     U_plot2 = np.copy(U_plot)
     for t in range(T):
@@ -431,32 +449,35 @@ if __name__ == '__main__':
     
     Funds = ['A','B','C','D','E']
     monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds}
-    data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]) for f in Funds]).transpose()
+    data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds]).transpose()
     
     
     if False: #Show correlogram
         data_df = pd.DataFrame(data=data, columns=Funds)
         for f in data_df.columns:
-            plot_acf(data_df[f], lags=24)
+            plot_pacf(data_df[f], lags=24)
     invs_marginals, marg_names= fit_returns(data)
     
-    norta_data = fit_NORTA(data,len(data),len(data[0]), F_invs=invs_marginals)
+    #norta_data = fit_NORTA(data,len(data),len(data[0]), F_invs=invs_marginals)
     #pickle.dump( norta_data.C, open('./norta_obj.pickle', 'wb'), pickle.HIGHEST_PROTOCOL)
-    #norta_c_matrix = pickle.load(open('./norta_obj.pickle', 'rb'))
-    #F_invs = [build_empirical_inverse_cdf(np.sort(data[:,i])) for i in range(len(Funds))]
+    norta_c_matrix = pickle.load(open('./norta_obj.pickle', 'rb'))
+    F_invs = [build_empirical_inverse_cdf(np.sort(data[:,i])) for i in range(len(Funds))]
     #F_invs = invs_marginals
-    #norta_data = NORTA(F_invs ,norta_c_matrix )
+    norta_data = NORTA(F_invs ,norta_c_matrix )
     NG = norta_data.gen(10000)
-    monthly_returns = {f:NG[:,i]/100 for (i,f) in enumerate(Funds)}
+    monthly_returns = {f:NG[:,i] for (i,f) in enumerate(Funds)}
     r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
     
     #Same shapre ratio experiment
     data_cov = np.cov(data, rowvar=False)
     SDs = np.sqrt(np.diag(data_cov))
-    sharpe_ratio = 0.8 
-    sr_mean_returs = rf*100 + sharpe_ratio*SDs
-    norm_r = np.
-    monthly_returns = {f:norm_r[:,i]/100 for (i,f) in enumerate(Funds)}
+    #sharpe_ratio = 0.12 + 0*np.array([0.13,0.165,0.21,0.275,0.28]) # High
+    #sharpe_ratio = np.array([0.13,0.165,0.21,0.275,0.28]) # High
+    #sharpe_ratio = np.array([0.12,0.14,0.17,0.21,0.22])  # Mid
+    sharpe_ratio = np.array([0.11,0.13,0.16,0.185,0.18])  #low
+    sr_mean_returs = (-1+(1+rf)**(1/12)) + sharpe_ratio*SDs
+    norm_r = np.random.multivariate_normal(sr_mean_returs,data_cov,size=10000)
+    monthly_returns = {f:norm_r[:,i] for (i,f) in enumerate(Funds)}
     r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
     
     
@@ -465,15 +486,15 @@ if __name__ == '__main__':
     print([np.mean(r[a]) for a in Funds])
     print([np.std(r[a]) for a in Funds])
     print([(np.mean(r[a])-rf)/np.std(r[a]) for a in Funds])
-  
+    #plt.scatter([np.std(r[a]) for a in Funds] , [np.mean(r[a]) for a in Funds] )
     
     
     
     np.random.seed(0)
     replicas = 10000
     simulated_returns = {}
-    NG_sim = norta_data.gen(20000)
-    monthly_returns_sim = {f:NG_sim[:,i]/100 for (i,f) in enumerate(Funds)}
+    NG_sim =norta_data.gen(20000) # np.random.multivariate_normal(sr_mean_returs,data_cov,size=10000)#
+    monthly_returns_sim = {f:NG_sim[:,i] for (i,f) in enumerate(Funds)}
     r_sim = gen_yearly_returns(Funds, monthly_returns_sim,  n_years=15000)
     for k in range(replicas):
         for t in range(T):
@@ -492,6 +513,12 @@ if __name__ == '__main__':
     Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %("Default"))
     #plot_simulation(Default_sim_results, def_pol, style=1)
     plot_policy_and_sim(T ,S, w_map,  def_pol, Funds, G, Default_sim_results )
+    
+    
+#    def_pol = {(t,w_map(s)):('E' if t<=15 else ('A' if 15<t<=25 else ('E' if 25<t<=30 else ('E' if 30<t<=33 else 'E')))) for t in range(T) for s in S}
+#    Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %("Default"))
+#    #plot_simulation(Default_sim_results, def_pol, style=1)
+#    plot_policy_and_sim(T ,S, w_map,  def_pol, Funds, G, Default_sim_results )
     
     
     plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
@@ -515,14 +542,17 @@ if __name__ == '__main__':
     
     plot_policies_comparizon(('Default', Default_sim_results),('SSD', DP_sim_results), G)
     
+    pY = np.percentile(Y,q=5)
     V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps , Y, sdd_tail=True)
-    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("SSD-Tail))
+    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('SSD-Tail'))
     #plot_simulation(DP_sim_results, U, style=1)
     plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
     
     plot_policies_comparizon(('Default', Default_sim_results),('SSD-Tail', DP_sim_results), G)
     
-    
+    plt.subplots()
+    for t in range(T):
+        plt.plot(V[t,:])
     for a in Funds:
         policy_a = {(t,w_map(s)):a for t in range(T) for s in S}
         sim_results = simulation(T,policy_a,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %(a))
