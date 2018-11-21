@@ -404,6 +404,8 @@ def create_marginal_fun(best_dist, best_params):
     dist = getattr(st, best_dist)
     def marginal_inv(q):
         print(dist)
+        rv = dist(*best_params)
+        print(rv.stats('mvsk'))
         return dist.ppf(q,*best_params)
     return marginal_inv
     
@@ -415,9 +417,12 @@ def fit_returns(data):
     '''
     marginals = [] 
     dist_names = []
-    candidates =['norm','gamma', 'dgamma',   'johnsonsb', 'johnsonub']
+    candidates =['norm','gamma', 'dgamma',   'johnsonsb', 'johnsonub', 'lognorm', 't', 'weibull_max', 'weibull_min']
+    #candidates =['johnsonsb', 'johnsonub', 'lognorm','t']
     for j in range(len(data[0])):
-        f = Fitter(data[:,j], distributions=candidates, verbose=False)
+        dj = data[:,j]
+        bin_num = int(np.round((dj.max()-dj.min())/(2*st.iqr(dj)*(len(dj)**(-1/3)))))
+        f = Fitter(dj, distributions=candidates, bins=bin_num, verbose=False)
         f.fit()
         best_dist = f.df_errors.sumsquare_error.idxmin()
         print(best_dist)

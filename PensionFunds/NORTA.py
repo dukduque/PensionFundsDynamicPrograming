@@ -3,7 +3,8 @@
 """
 Created on Tue Oct  9 12:58:58 2018
 
-@author: dduque
+@author: Daniel Duque
+@email: d.duque25@gmail.com
 
 This module implements Normal-to-Anything (NORTA) algorithm
 to generate correlated random vectors. The original paper is by

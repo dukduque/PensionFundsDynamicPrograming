@@ -68,8 +68,7 @@ def write_VARTA_input(data, lag, samples):
     
     return rho_matrices
                     
-                    
-        
+    st.t.stats
     
     
 def estimated_autocorrelation(x,y,l):
