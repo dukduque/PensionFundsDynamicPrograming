@@ -117,12 +117,12 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
     Y (ndarray): realizations of the benchmark
     '''
     assert df<1
-    max_wealth = np.round(3*G,-3) - (np.round(3*G,-3) % (steps-1))
+    max_wealth = np.round(10*G,-3) - (np.round(10*G,-3) % (steps-1))
     w_delta = int(max_wealth/(steps-1)) 
     V = np.zeros((T+1,steps))
     U = {}
     #R = np.eye(steps) #PMF of final wealth
-    var_val = 0.3
+    var_val = 0.30
     cvarY = cvar(-Y,var_val)
     
     A = r.keys()
@@ -150,17 +150,18 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
                 if t >= T-1:
                     s_a_i = w_map((s)*(1+r[a])+c*I_t)
                     X = S[s_a_i]
-                    XX = np.tile(X, (len(Y), 1))
-                    SSD =  np.maximum(Y - XX.transpose(), 0 )
-                    SDD_mean = SSD.mean(0)
-                    if sdd_tail:
-                        v_a = -SDD_mean[Y<G].sum()
-                    else:
-                        v_a = -SDD_mean.sum()
-#                    cvarX = cvar(-X,var_val)
-#                    v_a =df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
-#                    if cvarX > cvarY:
-#                        v_a = v_a  - 100*(cvarX-cvarY)
+#                    XX = np.tile(X, (len(Y), 1))
+#                    SSD =  np.maximum(Y - XX.transpose(), 0 )
+#                    SDD_mean = SSD.mean(0)
+#                    if sdd_tail:
+#                        v_a = -SDD_mean[Y<G].sum()
+#                    else:
+#                        v_a = -SDD_mean.sum()
+                    cvarX = cvar(-X,var_val)
+                    v_a =df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
+                    if cvarX > cvarY:
+                        #v_a = v_a  - 100*(cvarX-cvarY)
+                        v_a = v_a  - (cvarX-cvarY)**2
                 else:
                     s_a_i = w_map((s)*(1+r[a])+c*I_t)
                     v_a = df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
@@ -206,8 +207,15 @@ def simulation(T,U,w_map,r,I0,c, replications, fix_policy=None, policy_name ="")
     p80 = 1- wealths[wealths <= 0.8*G].size / wealths.size
     p90 = 1- wealths[wealths <= 0.9*G].size / wealths.size
     p95 = 1- wealths[wealths <= 0.95*G].size / wealths.size
-    print('%15s %10s %10s %10s %10s %10s %10s %10s' %('Policy', 'Mean', 'SD', '70%', '80%', '90%', '95%', 'E.Shortfal' ))
-    print('%15s %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f' %(policy_name, np.mean(wealths), np.std(wealths), p70, p80, p90, p95, (G-np.mean(wealths[wealths <= G]))))
+    p100 = 1- wealths[wealths <= G].size / wealths.size
+    mu = np.mean(wealths)
+    below_mu = wealths[wealths<=mu] - mu
+    above_mu = wealths[wealths>mu] - mu
+    print(len(below_mu), len(above_mu))
+    sd_m = np.sqrt(np.sum(below_mu**2)/len(below_mu))
+    sd_p = np.sqrt(np.sum(above_mu**2)/len(above_mu))
+    print('%15s %10s %10s %10s %10s %10s %10s %10s %10s %10s' %('Policy', 'Mean', 'SD-', 'SD+', '70%', '80%', '90%', '95%', '100%' ,  'E.Shortfal' ))
+    print('%15s %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f' %(policy_name, mu, sd_m, sd_p, p70, p80, p90, p95, p100, (G-np.mean(wealths[wealths <= G]))))
     
     return wealth_sims
 
@@ -274,9 +282,6 @@ def plot_policies_comparizon(p1_results, p2_results,G):
     wealths.sort()
     bins = 300
     heights,bins = np.histogram(wealths,bins=bins)
-#    heights = heights/sum(heights)
-#    ax.bar(bins[:-1],heights,width=(max(bins) - min(bins))/len(bins), color="blue", alpha=0.6 , label=p1_results[0])
-    
     n_pdf = 10000
     fig, ax = plt.subplots()
     hist_dist1 = scipy.stats.rv_histogram((heights,bins))
@@ -292,20 +297,13 @@ def plot_policies_comparizon(p1_results, p2_results,G):
     wealths.sort()
     bins = 300
     heights,bins = np.histogram(wealths,bins=bins)
-#    heights = heights/sum(heights)
-#    ax.bar(bins[:-1],heights,width=(max(bins) - min(bins))/len(bins), color="red", alpha=0.6, label=p2_results[0])
-#    ax.legend(loc='best', shadow=True, fontsize='small')
-#    ax.set_xlabel('Wealth at T')
-#    ax.set_ylabel('Frequency')
-#    ax.axvline(G , label='G')
-#    axR.hist(wealths[:], bins=bins, normed=True, cumulative=True, label='CDF %s' %(p2_results[0]), histtype='step', alpha=0.8, color='red')
-#    axR.set_yticks(np.linspace(0, 1, 5))
-#    axR.set_ylim(0,1)
-    hist_dist2 = scipy.stats.rv_histogram((heights,bins))
-    X = np.linspace(wealths[0], wealths[-1], n_pdf)
-    max_p2 = np.max(hist_dist2.pdf(X))
-    ax.fill_between(X,hist_dist2.pdf(X),np.zeros_like(X), alpha=0.5, color='red')
-    axR.plot(X, hist_dist2.cdf(X), label=p2_results[0], color='red')
+    max_p2 = 0
+    if len(wealths)>0:
+        hist_dist2 = scipy.stats.rv_histogram((heights,bins))
+        X = np.linspace(wealths[0], wealths[-1], n_pdf)
+        max_p2 = np.max(hist_dist2.pdf(X))
+        ax.fill_between(X,hist_dist2.pdf(X),np.zeros_like(X), alpha=0.5, color='red')
+        axR.plot(X, hist_dist2.cdf(X), label=p2_results[0], color='red')
     
     
     ax.set_yticks(np.linspace(0, np.maximum(max_p1,max_p2), 11))
@@ -417,7 +415,7 @@ def fit_returns(data):
     '''
     marginals = [] 
     dist_names = []
-    candidates =['norm','gamma', 'dgamma',   'johnsonsb', 'johnsonub', 'lognorm', 't', 'weibull_max', 'weibull_min']
+    candidates =['norm','gamma', 'dgamma',   'johnsonub', 'lognorm', 't', 'weibull_max', 'weibull_min']
     #candidates =['johnsonsb', 'johnsonub', 'lognorm','t']
     for j in range(len(data[0])):
         dj = data[:,j]
@@ -548,12 +546,16 @@ if __name__ == '__main__':
     plot_policies_comparizon(('Default', Default_sim_results),('SSD', DP_sim_results), G)
     
     pY = np.percentile(Y,q=5)
-    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps , Y, sdd_tail=True)
+    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps*4 , Y, sdd_tail=True)
     DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('SSD-Tail'))
     #plot_simulation(DP_sim_results, U, style=1)
     plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
+    plot_policies_comparizon(('Default', Default_sim_results),('CVaR-Quadratic', DP_sim_results), G)
+   
     
     plot_policies_comparizon(('Default', Default_sim_results),('SSD-Tail', DP_sim_results), G)
+    
+    
     
     plt.subplots()
     for t in range(T):
@@ -562,4 +564,4 @@ if __name__ == '__main__':
         policy_a = {(t,w_map(s)):a for t in range(T) for s in S}
         sim_results = simulation(T,policy_a,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %(a))
         #plot_policy_and_sim(T ,S, w_map,  policy_a, Funds, G, sim_results )
-        #plot_policies_comparizon(('', []),  (a, sim_results), G)
+        plot_policies_comparizon((a, sim_results),('', []), G)
