@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
+import matplotlib.colors as col
 import scipy.stats
 import scipy.stats as st
 import pandas as pd
@@ -48,7 +49,7 @@ def utility_function(x, G):
 
 def w_index(w_delta, max_wealth, steps):
     def f(x):
-        p = np.round(x,0)/w_delta
+        p = np.floor(x/w_delta) + 1# np.round(x,0)/w_delta
         p = np.minimum(p, steps-1)
         p = np.maximum(p, 0)
         p = p.astype(int)
@@ -106,6 +107,66 @@ def backward_induction(T, G , df, rf, r, I, c , steps, cvar = False):
             V[t,s_index] = V_s
             U[t,s_index] = arg_max    
     return V,U,S,w_map
+
+def backward_induction_mix(T, G , df, rf, r, I, c , steps, cvar = False):
+    '''
+    Runs backward induction to find the optimal policy of selecting 
+    a fund at each time period give a particular amounth of wealth.
+    '''
+    assert df<1
+    max_wealth = np.round(3*G,-3) - (np.round(3*G,-3) % (steps-1))
+    w_delta = int(max_wealth/(steps-1)) 
+    V = np.zeros((T+1,steps))
+    U = {}
+    
+    
+    A = r.keys()
+    A = list(A)
+    A.sort()
+    Actions = [] 
+    r_mat = np.zeros((len(A),len(r[A[0]])))
+    for (i,ai) in enumerate(A):
+        ac = np.zeros(len(A))
+        ac[i] = 1
+        Actions.append(ac)
+        r_mat[i,:]= r[ai]
+        for (j,aj) in enumerate(A):
+            if j>i:
+                for alp in [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
+                    ac = np.zeros(len(A))
+                    ac[i] = alp
+                    ac[j] = 1-alp
+                    Actions.append(ac)
+    Actions = np.array(Actions)
+    act_ret = Actions.dot(r_mat)
+    w_map = w_index(w_delta, max_wealth,steps)
+    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
+    
+    for (i,s) in enumerate(S):
+        assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
+    
+    # Value in the last stage
+    V[T,:] = utility_function(S,G) 
+
+    for t in np.arange(T-1, T-2, -1):
+        I_t = I*(1+rf)**t
+        print('solving ', t, ' ' , I_t)
+        for s in S:
+            s_index = w_map(s)
+            arg_max = None
+            V_s = -np.inf
+            for (k,a) in enumerate(Actions):
+                v_a = None
+                s_a_i = w_map((s)*(1+act_ret[k])+c*I_t)
+                v_a = (1/len(act_ret[k]))*np.sum(V[t+1,s_a_i]) #Expectation
+                if v_a>=V_s: #Choose less risk of alternative optima
+                    V_s = v_a
+                    arg_max = a
+            V[t,s_index] = V_s
+            U[t,s_index] = arg_max    
+    return V,U,S,w_map,Actions
+
+
 
 
 def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
@@ -176,6 +237,92 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
         #R = np.copy(Rt)
     return V,U,S,w_map
 
+
+def backward_induction_sd_mix(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
+    '''
+    Runs backward induction to find the optimal policy of selecting 
+    a fund at each time period give a particular amounth of wealth.
+    Stochastic domiance variant
+    
+    Y (ndarray): realizations of the benchmark
+    '''
+    assert df<1
+    max_wealth = np.round(3*G,-3) - (np.round(3*G,-3) % (steps-1))
+    w_delta = int(max_wealth/(steps-1)) 
+    V = np.zeros((T+1,steps))
+    U = {}
+    #R = np.eye(steps) #PMF of final wealth
+    var_val = 0.30
+    cvarY = cvar(-Y,var_val)
+    
+    A = r.keys()
+    A = list(A)
+    A.sort()
+    Actions = [] 
+    r_mat = np.zeros((len(A),len(r[A[0]])))
+    for (i,ai) in enumerate(A):
+        ac = np.zeros(len(A))
+        ac[i] = 1
+        Actions.append(ac)
+        r_mat[i,:]= r[ai]
+        for (j,aj) in enumerate(A):
+            if j>i:
+                for alp in [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
+                    ac = np.zeros(len(A))
+                    ac[i] = alp
+                    ac[j] = 1-alp
+                    Actions.append(ac)
+    Actions = np.array(Actions)
+    act_ret = Actions.dot(r_mat)
+    w_map = w_index(w_delta, max_wealth,steps)
+    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
+    
+    #for (i,s) in enumerate(S):
+    #    assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
+    
+    # Value in the last stage
+    V[T,:] = S# utility_function(S,G) 
+
+    for t in np.arange(T-1, -1, -1):
+        I_t = I*(1+rf)**t
+        #Rt= np.zeros_like(R) #PMF of final wealth at t
+        print('solving ', t, ' ' , I_t)
+        for s in S:
+            #print('s=',w_map(s), ' ', s)
+            s_index = w_map(s)
+            arg_max = None
+            V_s = -np.inf
+            #nR = None
+            for (k,a) in enumerate(Actions):
+                v_a = None
+                s_a_i = w_map((s)*(1+act_ret[k])+c*I_t)
+                if t >= T-1:
+                    X = S[s_a_i]
+#                    XX = np.tile(X, (len(Y), 1))
+#                    SSD =  np.maximum(Y - XX.transpose(), 0 )
+#                    SDD_mean = SSD.mean(0)
+#                    if sdd_tail:
+#                        v_a = -SDD_mean[Y<G].sum()
+#                    else:
+#                        v_a = -SDD_mean.sum()
+                    cvarX = cvar(-X,var_val)
+                    v_a =df*(1/len(s_a_i))*np.sum(V[t+1,s_a_i]) #Expectation
+                    if cvarX > cvarY:
+                        #v_a = v_a  - 100*(cvarX-cvarY)
+                        v_a = v_a  - (cvarX-cvarY)**2
+                else:
+                    v_a = df*(1/len(s_a_i))*np.sum(V[t+1,s_a_i]) #Expectation
+                if v_a>=V_s: #Choose less risk of alternative optima
+                    V_s = v_a
+                    arg_max = a
+                    #nR = R[s_a_i,:].sum(0)
+                    #nR = nR/nR.sum()
+            V[t,s_index] = V_s
+            U[t,s_index] = arg_max 
+            #Rt[s_index,:] = nR
+        #R = np.copy(Rt)
+    return V,U,S,w_map,Actions
+
 def cvar(x, alp):
     '''
     Computes the cvar of a given vector of obsebations
@@ -187,7 +334,37 @@ def cvar(x, alp):
     var_alp=np.percentile(x, q = int(alp*100))
     return x[x>=var_alp].mean()
 
-def simulation(T,U,w_map,r,I0,c, replications, fix_policy=None, policy_name =""):
+def create_default_policy(S,T,A):
+    U = {}
+    for t in range(T):
+        for s in range(len(S)):
+            if t <=14:
+                U[t,s] = np.array([0,1.0,0,0,0])
+            elif t <=15:
+                U[t,s] = np.array([0,0.8,0.2,0,0])
+            elif t <=16:
+                U[t,s] = np.array([0,0.6,0.4,0,0])
+            elif t <=17:
+                U[t,s] = np.array([0,0.4,0.6,0,0])
+            elif t <=18:
+                U[t,s] = np.array([0,0.2,0.8,0,0])
+            elif t <=34:
+                U[t,s] = np.array([0,0,1.0,0,0])
+            elif t <=35:
+                U[t,s] = np.array([0,0,0.8,0.2,0])
+            elif t <=36:
+                U[t,s] = np.array([0,0,0.6,0.4,0])
+            elif t <=37:
+                U[t,s] = np.array([0,0,0.4,0.6,0])
+            elif t <=38:
+                U[t,s] = np.array([0,0,0.2,0.8,0])
+            else:
+                U[t,s] = np.array([0,0,0,1.0,0])
+    return U
+            
+        
+            #def_pol = {(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=34 else 'D')) for t in range(T) for s in S}
+def simulation(T,U,w_map,r_sim,I0,c, replications, fix_policy=None, policy_name =""):
     np.random.seed(0)
 
     I = [I0*(1+rf)**t for t in range(T)]
@@ -196,7 +373,7 @@ def simulation(T,U,w_map,r,I0,c, replications, fix_policy=None, policy_name ="")
         wealth_k = [0]
         for t in range(T):
             policy = U[t,w_map(wealth_k[t])] if fix_policy==None else fix_policy
-            wealth_k.append((1+r[k,t,policy])*wealth_k[t] + c*I[t])
+            wealth_k.append((1+r_sim[k,t,:].dot(policy))*wealth_k[t] + c*I[t])
             
         wealth_sims.append(wealth_k)
     if fix_policy == None:
@@ -379,6 +556,51 @@ def plot_policy_and_sim(T, S, w_map, policy, Funds, G, sim_results):
     ax.set_ylabel('Wealth ($USD)')
     plt.tight_layout()
     plt.show()
+
+
+def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results):
+    
+    #basic_cols = ['red', 'yellow','cyan', 'lime', 'blue']
+    basic_cols = ['red', 'blue', 'lime', 'magenta', 'yellow']
+    basic_cols_rgs = np.array([col.to_rgb(c) for c in basic_cols])
+    policy_colors = actions.dot(basic_cols_rgs)
+    policy_colors = np.vstack((col.to_rgb('black') , policy_colors))
+    actions_str = [str(pc) for pc in actions]
+    F = {a:i for (i,a) in enumerate(actions_str)}
+    U_plot = np.array([[F[str(policy[t,w_map(s)])] for t in range(T)] for s in S if s<=G*1.5])
+    U_plot[w_map(G)-10:w_map(G)+10,:] = -1 #Draw G
+    #Draw simulation 5-95%
+    U_plot2 = np.copy(U_plot)
+    for t in range(T):
+        r_t = np.array([sim[t] for sim in sim_results])
+        r_t.sort()
+        w_5 = r_t[int(len(r_t)*0.05)]
+        w_95 = r_t[int(len(r_t)*0.95)]
+        #U_plot2[w_map(w_5):w_map(w_95),t] = -1
+        U_plot2[w_map(w_5):w_map(w_5)+10,t] = -1
+        U_plot2[w_map(w_95)-10:w_map(w_95),t] = -1
+        
+
+    cmap = colors.ListedColormap(policy_colors)
+    fig, ax = plt.subplots()
+    steps_displayed = len(U_plot)
+    im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(actions)-1)
+    im2 = ax.imshow(U_plot2, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(actions)-1, alpha=0.8)
+    
+    # We want to show all ticks...
+    ax.set_xticks(np.arange(0,T+1,5))
+    y_ticks = np.arange(0,steps_displayed,int(steps_displayed/10))
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(S[y_ticks])
+    # colormap used by imshow
+    #values = [F[a] for a in funds]
+    cols = basic_cols#[ im.cmap(im.norm(value)) for value in values]
+    patches = [ mpatches.Patch(color=cols[i], label="Fund {l}".format(l=funds[i]) ) for i in range(len(funds)) ]
+    ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0. )
+    ax.set_xlabel('Years')
+    ax.set_ylabel('Wealth ($USD)')
+    plt.tight_layout()
+    plt.show()
     
 #    show_steps = int(steps/2)
 #    X = {}
@@ -471,17 +693,17 @@ if __name__ == '__main__':
     monthly_returns = {f:NG[:,i] for (i,f) in enumerate(Funds)}
     r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
     
-    #Same shapre ratio experiment
-    data_cov = np.cov(data, rowvar=False)
-    SDs = np.sqrt(np.diag(data_cov))
-    #sharpe_ratio = 0.12 + 0*np.array([0.13,0.165,0.21,0.275,0.28]) # High
-    #sharpe_ratio = np.array([0.13,0.165,0.21,0.275,0.28]) # High
-    #sharpe_ratio = np.array([0.12,0.14,0.17,0.21,0.22])  # Mid
-    sharpe_ratio = np.array([0.11,0.13,0.16,0.185,0.18])  #low
-    sr_mean_returs = (-1+(1+rf)**(1/12)) + sharpe_ratio*SDs
-    norm_r = np.random.multivariate_normal(sr_mean_returs,data_cov,size=10000)
-    monthly_returns = {f:norm_r[:,i] for (i,f) in enumerate(Funds)}
-    r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
+#    #Same shapre ratio experiment
+#    data_cov = np.cov(data, rowvar=False)
+#    SDs = np.sqrt(np.diag(data_cov))
+#    #sharpe_ratio = 0.12 + 0*np.array([0.13,0.165,0.21,0.275,0.28]) # High
+#    #sharpe_ratio = np.array([0.13,0.165,0.21,0.275,0.28]) # High
+#    #sharpe_ratio = np.array([0.12,0.14,0.17,0.21,0.22])  # Mid
+#    sharpe_ratio = np.array([0.11,0.13,0.16,0.185,0.18])  #low
+#    sr_mean_returs = (-1+(1+rf)**(1/12)) + sharpe_ratio*SDs
+#    norm_r = np.random.multivariate_normal(sr_mean_returs,data_cov,size=10000)
+#    monthly_returns = {f:norm_r[:,i] for (i,f) in enumerate(Funds)}
+#    r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
     
     
     Funds = list(r.keys())
@@ -495,27 +717,27 @@ if __name__ == '__main__':
     
     np.random.seed(0)
     replicas = 10000
-    simulated_returns = {}
+    simulated_returns = np.zeros((replicas,T,len(Funds)))
     NG_sim =norta_data.gen(20000) # np.random.multivariate_normal(sr_mean_returs,data_cov,size=10000)#
     monthly_returns_sim = {f:NG_sim[:,i] for (i,f) in enumerate(Funds)}
     r_sim = gen_yearly_returns(Funds, monthly_returns_sim,  n_years=15000)
     for k in range(replicas):
         for t in range(T):
-            r_index = np.random.randint(0,len(r['A']))
-            for a in Funds:
-                simulated_returns[k,t,a] = r_sim[a][r_index]
+            r_index = np.random.randint(0,len(r_sim['A']))
+            for (i,a) in enumerate(Funds):
+                simulated_returns[k,t,i] = r_sim[a][r_index]
  
         
-    V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps , cvar=False)
+    V,U,S,w_map,A = backward_induction_mix(T,G,df,rf,r,I0,c, steps , cvar=False)
     DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("DP utility"))
     #plot_simulation(DP_sim_results, U, style=1)
-    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results )
-    
+    plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results )
+   
        
-    def_pol = {(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=34 else 'D')) for t in range(T) for s in S}
+    def_pol = create_default_policy(S,T,A)#{(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=34 else 'D')) for t in range(T) for s in S}
     Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %("Default"))
     #plot_simulation(Default_sim_results, def_pol, style=1)
-    plot_policy_and_sim(T ,S, w_map,  def_pol, Funds, G, Default_sim_results )
+    plot_policy_and_sim2(T ,S, w_map,  def_pol, Funds, A, G, Default_sim_results )
     
     
 #    def_pol = {(t,w_map(s)):('E' if t<=15 else ('A' if 15<t<=25 else ('E' if 25<t<=30 else ('E' if 30<t<=33 else 'E')))) for t in range(T) for s in S}
@@ -555,6 +777,13 @@ if __name__ == '__main__':
     
     plot_policies_comparizon(('Default', Default_sim_results),('SSD-Tail', DP_sim_results), G)
     
+    
+    Y = simulation(T,def_pol,w_map,simulated_returns,I0,c, 1000, policy_name="%10s" %("Default-Benchmarck"))
+    Y =  np.array([sr[-1] for sr in Y])
+    V,U,S,w_map,A = backward_induction_sd_mix(T,G,df,rf,r,I0,c, steps , Y, sdd_tail=True)
+    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('CVaR_Q'))
+    #plot_simulation(DP_sim_results, U, style=1)
+    plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results)
     
     
     plt.subplots()
