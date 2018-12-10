@@ -381,7 +381,7 @@ def backward_induction_sd_mix_par(T, G , rf, r, I, c , steps, Y, method='ssd', s
     #R = np.eye(steps) #PMF of final wealth
     var_val = 0.30
     cvarY = cvar(-Y,var_val)
-    Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
+    Yq = np.percentile(Y,q=[5*i for i in range(0,21)],axis=0)
     Ytail=Yq[Yq<G]
     SDD_constant = None
     if ssd_tail == False:
@@ -482,6 +482,8 @@ def dp_parallel(dp_data):
                 if cvarX > cvarY:
                     #v_a = v_a  - 100*(cvarX-cvarY)
                     v_a = v_a  - (cvarX-cvarY)**2
+            elif method == ALG_UTILITY:
+                v_a = df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
             else:
                 raise 'unimplemented method'
         else:
@@ -1030,7 +1032,7 @@ if __name__ == '__main__':
     V,U,S,w_map,A = backward_induction_sd_mix(T,G,df,rf,r,I0,c, steps , Y, ssd_tail=False)
     print(time()-tnow)
     tnow = time()
-    V,U,S,w_map,A = backward_induction_sd_mix_par(T,G,rf,r,I0,c, steps , Y, method=ALG_CVAR_PENALTY , ssd_tail=False)
+    V,U,S,w_map,A = backward_induction_sd_mix_par(T,G,rf,r,I0,c, steps , Y, method=ALG_UTILITY , ssd_tail=False)
     print(time()-tnow)    
     DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('CVaR_Q'))
     #plot_simulation(DP_sim_results, U, style=1)
