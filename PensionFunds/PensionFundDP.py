@@ -24,9 +24,12 @@ import multiprocessing as mp
 from itertools import product
 from time import time
 
+ALG_UTILITY = 'utility'
 ALG_CVAR_PENALTY = 'cvar_penalty'
 ALG_SSD = 'ssd'
-ALG_UTILITY = 'utility'
+ALG_SSD_TAIL= 'ssd tail'
+ALG_SSD_MINMAX='ssd_minamx'
+
 
 def utility_function(x, G):
     '''
@@ -354,7 +357,7 @@ def backward_induction_sd_mix(T, G , df, rf, r, I, c , steps, Y, method='ssd', s
         #R = np.copy(Rt)
     return V,U,S,w_map,Actions
 
-def backward_induction_sd_mix_par(T, G , rf, r, I, c , steps, Y, method='ssd', ssd_tail = False):
+def backward_induction_sd_mix_par(T, G , rf, r, I, c , Y, w_delta=100, method=ALG_UTILITY, n_threads=1):
     '''
     Runs backward induction to find the optimal policy of a dynamic
     asset allocation problem. This method implements a parralle version
@@ -367,24 +370,30 @@ def backward_induction_sd_mix_par(T, G , rf, r, I, c , steps, Y, method='ssd', s
         r (dict): historical returns of the funds
         I (float): initial salary
         c (float): fraction of the anual salary contributed to retirment
-        steps (int): number of steps in the discretization of the state space
         Y (ndarray): realizations of the benchmark
+        w_delta (float): discretization gap used in in the DP for the state variable
         method (str): method used in the optimization
-        ssd_tail (bool): I method is SSD, this parameter specifies if only 
-                         the lower tail is considered.
+        n_threads (int): number of threads to used in the DP
     '''
-    max_welath_multiple = 5
+    print('Runing DP with %s and %i threads' %(method, n_threads))
+    
+    tnow = time()
+    max_welath_multiple = 10
+    max_wealth = max_welath_multiple*G
+    steps = int(max_wealth/w_delta)
     max_wealth = np.round(max_welath_multiple*G,-3) - (np.round(max_welath_multiple*G,-3) % (steps-1))
-    w_delta = int(max_wealth/(steps-1)) 
+    np.round(max_welath_multiple*G,-3)
+    
+    
     V = np.zeros((T+1,steps))
     U = {}
     #R = np.eye(steps) #PMF of final wealth
     var_val = 0.30
     cvarY = cvar(-Y,var_val)
-    Yq = np.percentile(Y,q=[5*i for i in range(0,21)],axis=0)
+    Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
     Ytail=Yq[Yq<G]
     SDD_constant = None
-    if ssd_tail == False:
+    if method == ALG_SSD:
         YY = np.tile(Yq, (len(Yq), 1))
         SSD =  np.maximum(Yq - YY.transpose(), 0 )
         SDD_constant = SSD.mean(0)
@@ -405,8 +414,8 @@ def backward_induction_sd_mix_par(T, G , rf, r, I, c , steps, Y, method='ssd', s
             if j>i:
                 for alp in [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
                     ac = np.zeros(len(A))
-                    ac[i] = alp
-                    ac[j] = 1-alp
+                    ac[i] = 1-alp
+                    ac[j] = alp
                     Actions.append(ac)
     Actions = np.array(Actions)
     act_ret = Actions.dot(r_mat)
@@ -422,22 +431,27 @@ def backward_induction_sd_mix_par(T, G , rf, r, I, c , steps, Y, method='ssd', s
     else:
         V[T,:] = S# utility_function(S,G) 
 
-    p  = mp.Pool(4)
+    p  = mp.Pool(n_threads)
 
     for t in np.arange(T-1, -1, -1):
         I_t = I*(1+rf)**t
-        #Rt= np.zeros_like(R) #PMF of final wealth at t
-        print('solving ', t, ' ' , I_t)
+        #print('solving ', t, ' ' , I_t)
         #Launch parallelization for each possible state
-        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[Actions],[ssd_tail],[SDD_constant],[cvarY],[var_val])
+        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[Actions],[SDD_constant],[cvarY],[var_val])
         out_par = p.map(dp_parallel,par_data)
         V[t,:] = np.array([par_res[0] for par_res in out_par])
         for (i,s) in enumerate(S):
             U[t,i] = out_par[i][1]
-   
+    total_time = time()-tnow
+    print('CPU time: %10.2f' %(total_time) )
     return V,U,S,w_map,Actions
 
 def dp_parallel(dp_data):
+    
+    '''
+    ================================
+    Parse all input data
+    '''
     s = dp_data[0]
     w_map = w_index(*dp_data[1])
     act_ret = dp_data[2]
@@ -450,15 +464,17 @@ def dp_parallel(dp_data):
     T = dp_data[9]
     Vt1 = dp_data[10]
     Actions = dp_data[11]
-    ssd_tail = dp_data[12]
-    SDD_constant = dp_data[13]
-    cvarY = dp_data[14]
-    var_val = dp_data[15]
-    #print('s=',w_map(s), ' ', s)
+    SDD_constant = dp_data[12]
+    cvarY = dp_data[13]
+    var_val = dp_data[14]
+    
+    '''
+    ================================
+    Solve DP for state s and time t
+    '''
     s_index = w_map(s)
     arg_max = None
     V_s = -np.inf
-    #nR = None
     X = s*(1+act_ret)+c*I_t
     Xind = w_map(X)
     for (k,a) in enumerate(Actions):
@@ -466,16 +482,20 @@ def dp_parallel(dp_data):
         s_a_i = Xind[k]
         if t >= T-1:
             if method == ALG_SSD:
-                if ssd_tail:
-                    XX = np.tile(X[k], (len(Ytail), 1))
-                    SSD =  np.maximum(Ytail - XX.transpose(), 0 )
-                    SDD_mean = SSD.mean(0)
-                    v_a = -SDD_mean.sum()
-                else:
-                    XX = np.tile(X[k], (len(Yq), 1))
-                    SSD =  np.maximum(Yq - XX.transpose(), 0 )
-                    SDD_mean = SSD.mean(0)
-                    v_a = -np.max(SDD_mean - SDD_constant)
+                XX = np.tile(X[k], (len(Yq), 1))
+                SSD =  np.maximum(Yq - XX.transpose(), 0 )
+                SDD_mean = SSD.mean(0)
+                v_a = -SDD_mean.sum()
+            elif method == ALG_SSD_TAIL:
+                XX = np.tile(X[k], (len(Ytail), 1))
+                SSD =  np.maximum(Ytail - XX.transpose(), 0 )
+                SDD_mean = SSD.mean(0)
+                v_a = -SDD_mean.sum()
+            elif method == ALG_SSD_MINMAX:
+                XX = np.tile(X[k], (len(Yq), 1))
+                SSD =  np.maximum(Yq - XX.transpose(), 0 )
+                SDD_mean = SSD.mean(0)
+                v_a = -np.max(SDD_mean - SDD_constant)
             elif method == ALG_CVAR_PENALTY:
                 cvarX = cvar(-X[k],var_val)
                 v_a =df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
@@ -491,8 +511,6 @@ def dp_parallel(dp_data):
         if v_a>=V_s: #Choose less risk of alternative optima
             V_s = v_a
             arg_max = a
-            #nR = R[s_a_i,:].sum(0)
-            #nR = nR/nR.sum()
     return V_s, arg_max 
 
 
@@ -806,11 +824,36 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results):
     #values = [F[a] for a in funds]
     cols = basic_cols#[ im.cmap(im.norm(value)) for value in values]
     patches = [ mpatches.Patch(color=cols[i], label="Fund {l}".format(l=funds[i]) ) for i in range(len(funds)) ]
-    ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0. )
+#    ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0. )
+    fig.colorbar(im)
     ax.set_xlabel('Years')
     ax.set_ylabel('Wealth ($USD)')
-    plt.tight_layout()
+    plt.tight_layout() 
     plt.show()
+
+    #Plot of the leyend
+#    L_plot = []
+#    pairs = [(i,j) for (i,f1) in enumerate(funds) for (j,f2) in enumerate(funds) if i<j]
+#    for alp in [0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1]:
+#        L_plot.append([])
+#        for (i,j) in pairs:  
+#            ac = np.zeros(len(funds))
+#            ac[i] = 1-alp
+#            ac[j] = alp
+#            ac_map = F[str(ac)]
+#            L_plot[-1].append(ac_map)
+#    L_plot = np.array(L_plot)
+#    cmap = colors.ListedColormap(actions.dot(basic_cols_rgs))
+#    fig, ax = plt.subplots()
+#    steps_displayed = len(U_plot)
+#    im = ax.imshow(L_plot, cmap=cmap,  interpolation='none', aspect='auto' ,origin='lower', vmin=0, vmax=len(actions)-1)
+#    ax.set_xticks(np.arange(0,len(pairs),1))
+#    ax.set_xticklabels(["%s-%s" %(funds[p[0]],funds[p[1]]) for p in pairs])
+#    ax.set_yticks(np.arange(0,11,1))
+#    ax.set_yticklabels(np.arange(0,11,1)/10)
+#    plt.tight_layout()
+#    plt.show()
+    
     
 #    show_steps = int(steps/2)
 #    X = {}
@@ -911,7 +954,7 @@ if __name__ == '__main__':
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
     
     df = 0.98
-    steps = 9001
+    steps = 5001
     #returns
     
     file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
@@ -1039,8 +1082,15 @@ if __name__ == '__main__':
     plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results)
     
     get_investment_profiles(DP_sim_results, U, w_map,T,A, Funds)
-        
-        
+    
+    methods_dp = [ALG_UTILITY, ALG_SSD,ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY]
+    sols_DP = {}
+    for m in methods_dp:
+        dp_out = backward_induction_sd_mix_par(T,G,rf,r,I0,c, Y, w_delta=100, method=m , n_threads=4)
+        V,U,S,w_map,A = dp_out
+        DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
+        plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results)
+        sols_DP[m] = (dp_out, DP_sim_results)
         
     plt.subplots()
     for t in range(T):
@@ -1050,24 +1100,5 @@ if __name__ == '__main__':
         sim_results = simulation(T,policy_a,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %(a))
         #plot_policy_and_sim(T ,S, w_map,  policy_a, Funds, G, sim_results )
         plot_policies_comparizon((a, sim_results),('', []), G)
-
-
-result = 0 
-def myf(a,b):
-    global result
-    result = a+b
-    return a+b
-
-p = mp.Pool( )
-p.starmap(myf, ((2,3), (3,4), (3,231)))
-
-
-from threading import Thread
-arrgs = ((2,3), (3,4), (3,231))
-t1 = Thread(target=myf, args=(2,2))
-
-t1.start()
-
-res = t1.join()
 
 
