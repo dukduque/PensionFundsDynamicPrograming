@@ -1047,8 +1047,6 @@ if __name__ == '__main__':
  
     default_policy, default_sim = run_default(T,r,w_delta,max_wealth) 
     Y =  np.array([sr[-1] for sr in default_sim])
-    a = adsd*3
-    
     
     #plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
     
@@ -1097,7 +1095,7 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ ALG_SSD,ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY] # ALG_UTILITY
+    methods_dp = [ALG_UTILITY, ALG_SSD,ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY] # ALG_UTILITY
     sols_DP = {}
     for m in methods_dp:
         dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y, w_delta=w_delta, method=m , n_threads=4)
