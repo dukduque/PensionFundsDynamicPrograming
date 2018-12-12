@@ -380,7 +380,7 @@ def setup(T, r, w_delta=100, max_wealth=2E6):
         A.append(ac)
         for (j,aj) in enumerate(F):
             if j>i:
-                for alp in [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
+                for alp in [0.05*i for i in range(1,20)]:
                     ac = np.zeros(len(F))
                     ac[i] = 1-alp
                     ac[j] = alp
@@ -1049,8 +1049,10 @@ if __name__ == '__main__':
             for (i,a) in enumerate(Funds):
                 simulated_returns[k,t,i] = r_sim[a][r_index]
  
+    
     default_policy, default_sim = run_default(T,r,w_delta,max_wealth) 
     Y =  np.array([sr[-1] for sr in default_sim])
+    sols_DP = {'Default':(default_policy, default_sim)}
     #a = das232
     #plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
     
@@ -1099,15 +1101,19 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY] # ALG_UTILITY ALG_UTILITY, ALG_SSD,
-    sols_DP = {}
+    methods_dp = [ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY]  
+    
     for m in methods_dp:
         dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y, w_delta=w_delta, method=m , n_threads=4)
         V,U = dp_out
         w_map = setup_data[3]
         DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
         sols_DP[m] = (dp_out, DP_sim_results)
-        
+    
+    all_policies_out  = (setup_data , sols_DP)
+    out_path = os.path.join(PF_path,'all_policies_out.pickle' )
+    pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
+    
     S, A, F, w_map, steps = setup_data
     
     for m in methods_dp:
