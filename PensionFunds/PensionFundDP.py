@@ -1110,11 +1110,13 @@ if __name__ == '__main__':
         DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
         sols_DP[m] = (dp_out, DP_sim_results)
     
-    all_policies_out  = (setup_data , sols_DP)
+    S, A, F, w_map, steps = setup_data 
+    
+    all_policies_out  = (S, A, F, T,r,w_delta,max_wealth , sols_DP)
     out_path = os.path.join(PF_path,'all_policies_out.pickle' )
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
+    #read_out = pickle.load(open(out_path, 'rb'))
     
-    S, A, F, w_map, steps = setup_data
     
     for m in methods_dp:
         dp_out, DP_sim_results = sols_DP[m] 
