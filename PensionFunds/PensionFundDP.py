@@ -417,7 +417,7 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, w_delt
     U = {}
     #R = np.eye(steps) #PMF of final wealth
     var_val, cvarY, Yq,  Ytail, SDD_constant = None, None, None, None, None
-    if type(Y)==type(None):
+    if type(Y)!=type(None):
         var_val = 0.30
         cvarY = cvar(-Y,var_val)
         Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
@@ -823,7 +823,7 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
         
 
     cmap = colors.ListedColormap(policy_colors)
-    fig, ax = plt.subplots(figsize=(20, 20), dpi=600)
+    fig, ax = plt.subplots(figsize=(10, 10), dpi=300)
     steps_displayed = len(U_plot)
     im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(actions)-1)
     im2 = ax.imshow(U_plot2, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(actions)-1, alpha=0.8)
@@ -837,17 +837,20 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
     #values = [F[a] for a in funds]
     cols = basic_cols#[ im.cmap(im.norm(value)) for value in values]
     patches = [ mpatches.Patch(color=cols[i], label="Fund {l}".format(l=funds[i]) ) for i in range(len(funds)) ]
-    if plot_name == 'Default':
-        ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0.2 )
+    #if plot_name == 'Default':
+    ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0.5 )
     #fig.colorbar(im)
     ax.set_xlabel('Years')
     ax.set_ylabel('Wealth ($USD)')
     plt.tight_layout() 
-    plt.savefig('./PensionFunds/Plots/%s.pdf' %(plot_name), bbox_inches = 'tight', pad_inches = 0)
-    pp = PdfPages('./PensionFunds/Plots/%s.pdf' %(plot_name))
+    plot_file = os.path.join(PF_path,'Plots/%s.pdf' %(plot_name) )
+    #plt.savefig(plot_file, bbox_inches = 'tight', pad_inches = 1)
+    pp = PdfPages(plot_file)
     pp.savefig(fig)
     pp.close()
-    #plt.show()
+    
+
+# scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
 
     #Plot of the leyend
 #    L_plot = []
@@ -980,9 +983,9 @@ if __name__ == '__main__':
     w = 2/3
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
     
-    df = 0.98
-    w_delta = 100
-    max_wealth = 2E6
+
+    w_delta = 50
+    max_wealth = 3E6
     #returns
     
     file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
@@ -1003,7 +1006,8 @@ if __name__ == '__main__':
     
     #norta_data = fit_NORTA(data,len(data),len(data[0]), F_invs=invs_marginals)
     #pickle.dump( norta_data.C, open('./norta_obj.pickle', 'wb'), pickle.HIGHEST_PROTOCOL)
-    norta_c_matrix = pickle.load(open('./PensionFunds/norta_obj.pickle', 'rb'))
+    norta_file = os.path.join(PF_path,'norta_obj.pickle' )
+    norta_c_matrix = pickle.load(open(norta_file, 'rb'))
     F_invs = [build_empirical_inverse_cdf(np.sort(data[:,i])) for i in range(len(Funds))]
     #F_invs = invs_marginals
     norta_data = NORTA(F_invs ,norta_c_matrix )
@@ -1047,7 +1051,7 @@ if __name__ == '__main__':
  
     default_policy, default_sim = run_default(T,r,w_delta,max_wealth) 
     Y =  np.array([sr[-1] for sr in default_sim])
-    
+    #a = das232
     #plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
     
 #    V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps , cvar=True)
@@ -1095,7 +1099,7 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_UTILITY, ALG_SSD,ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY] # ALG_UTILITY
+    methods_dp = [ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY] # ALG_UTILITY ALG_UTILITY, ALG_SSD,
     sols_DP = {}
     for m in methods_dp:
         dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y, w_delta=w_delta, method=m , n_threads=4)
