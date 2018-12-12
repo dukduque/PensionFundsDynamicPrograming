@@ -6,16 +6,26 @@ Created on Wed Oct  3 12:16:05 2018
 @author: dduque
 """
 
+#Setup dependencies in this project
+import os 
+import sys
+PF_path = os.path.dirname(os.path.realpath(__file__))
+parent_path= os.path.abspath(os.path.join(PF_path, os.pardir))
+sys.path.append(parent_path)
+
 import numpy as np
+import matplotlib
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
 import matplotlib.colors as col
+from matplotlib import colors 
+from matplotlib.backends.backend_pdf import PdfPages
 import scipy.stats
 import scipy.stats as st
 import pandas as pd
 import pickle
-from matplotlib import colors
 from PensionFunds.NORTA import fit_NORTA, NORTA, build_empirical_inverse_cdf
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.distributions.empirical_distribution import ECDF
@@ -249,6 +259,7 @@ def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
     return V,U,S,w_map
 
 
+
 def backward_induction_sd_mix(T, G , df, rf, r, I, c , steps, Y, method='ssd', ssd_tail = False):
     '''
     Runs backward induction to find the optimal policy of selecting 
@@ -357,7 +368,29 @@ def backward_induction_sd_mix(T, G , df, rf, r, I, c , steps, Y, method='ssd', s
         #R = np.copy(Rt)
     return V,U,S,w_map,Actions
 
-def backward_induction_sd_mix_par(T, G , rf, r, I, c , Y, w_delta=100, method=ALG_UTILITY, n_threads=1):
+def setup(T, r, w_delta=100, max_wealth=2E6):
+    steps = int(max_wealth/w_delta)
+    F = r.keys()
+    F = list(F)
+    F.sort()
+    A = []  
+    for (i,ai) in enumerate(F):
+        ac = np.zeros(len(F))
+        ac[i] = 1
+        A.append(ac)
+        for (j,aj) in enumerate(F):
+            if j>i:
+                for alp in [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
+                    ac = np.zeros(len(F))
+                    ac[i] = 1-alp
+                    ac[j] = alp
+                    A.append(ac)
+    A = np.array(A)
+    w_map = w_index(w_delta, max_wealth,steps)
+    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
+    return S, A, F, w_map, steps
+
+def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, w_delta=100, max_wealth=2E6, method=ALG_UTILITY, n_threads=1):
     '''
     Runs backward induction to find the optimal policy of a dynamic
     asset allocation problem. This method implements a parralle version
@@ -378,49 +411,27 @@ def backward_induction_sd_mix_par(T, G , rf, r, I, c , Y, w_delta=100, method=AL
     print('Runing DP with %s and %i threads' %(method, n_threads))
     
     tnow = time()
-    max_welath_multiple = 10
-    max_wealth = max_welath_multiple*G
-    steps = int(max_wealth/w_delta)
-    max_wealth = np.round(max_welath_multiple*G,-3) - (np.round(max_welath_multiple*G,-3) % (steps-1))
-    np.round(max_welath_multiple*G,-3)
-    
+    S, A, F, w_map, steps = setupData
     
     V = np.zeros((T+1,steps))
     U = {}
     #R = np.eye(steps) #PMF of final wealth
-    var_val = 0.30
-    cvarY = cvar(-Y,var_val)
-    Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
-    Ytail=Yq[Yq<G]
-    SDD_constant = None
-    if method == ALG_SSD:
-        YY = np.tile(Yq, (len(Yq), 1))
-        SSD =  np.maximum(Yq - YY.transpose(), 0 )
-        SDD_constant = SSD.mean(0)
+    var_val, cvarY, Yq,  Ytail, SDD_constant = None, None, None, None, None
+    if type(Y)==type(None):
+        var_val = 0.30
+        cvarY = cvar(-Y,var_val)
+        Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
+        Ytail=Yq[Yq<G]
+        if method == ALG_SSD_MINMAX:
+            YY = np.tile(Yq, (len(Yq), 1))
+            SSD =  np.maximum(Yq - YY.transpose(), 0 )
+            SDD_constant = SSD.mean(0)
     
     
-    
-    A = r.keys()
-    A = list(A)
-    A.sort()
-    Actions = [] 
-    r_mat = np.zeros((len(A),len(r[A[0]])))
-    for (i,ai) in enumerate(A):
-        ac = np.zeros(len(A))
-        ac[i] = 1
-        Actions.append(ac)
+    r_mat = np.zeros((len(F),len(r[F[0]])))
+    for (i,ai) in enumerate(F):
         r_mat[i,:]= r[ai]
-        for (j,aj) in enumerate(A):
-            if j>i:
-                for alp in [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
-                    ac = np.zeros(len(A))
-                    ac[i] = 1-alp
-                    ac[j] = alp
-                    Actions.append(ac)
-    Actions = np.array(Actions)
-    act_ret = Actions.dot(r_mat)
-    w_map = w_index(w_delta, max_wealth,steps)
-    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
+    act_ret = A.dot(r_mat)
     
     for (i,s) in enumerate(S):
         assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
@@ -435,16 +446,17 @@ def backward_induction_sd_mix_par(T, G , rf, r, I, c , Y, w_delta=100, method=AL
 
     for t in np.arange(T-1, -1, -1):
         I_t = I*(1+rf)**t
-        #print('solving ', t, ' ' , I_t)
+        print('solving ', t, ' ' , I_t)
         #Launch parallelization for each possible state
-        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[Actions],[SDD_constant],[cvarY],[var_val])
+        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val])
         out_par = p.map(dp_parallel,par_data)
         V[t,:] = np.array([par_res[0] for par_res in out_par])
         for (i,s) in enumerate(S):
             U[t,i] = out_par[i][1]
+    p.terminate()
     total_time = time()-tnow
     print('CPU time: %10.2f' %(total_time) )
-    return V,U,S,w_map,Actions
+    return V,U
 
 def dp_parallel(dp_data):
     
@@ -553,17 +565,18 @@ def cvar(x, alp):
     var_alp=np.percentile(x, q = int(alp*100))
     return x[x>=var_alp].mean()
 
-def create_default_policy(S,T):
+def create_default_policy(T,w_delta,max_wealth):
     '''
     Creates the defaul policy for chilean system. This policy uses funds
     B, C, and D  transicioning from B to C after 14 years and from C to D
     after 34 years.
     Args:
-        S (ndarray): States in the DP
         T (int): number of time periods
     Return:
         U (dict): dictionary with the policy for every time period and state. 
     '''
+    steps = int(max_wealth/w_delta) + 2
+    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
     U = {}
     for t in range(T):
         for s in range(len(S)):
@@ -749,7 +762,7 @@ def plot_policy(T, S, w_map, policy, Funds, G):
     plt.tight_layout()
     plt.show()
     
-def plot_policy_and_sim(T, S, w_map, policy, Funds, G, sim_results):
+def plot_policy_and_sim(T, S, w_map, policy, Funds, G, sim_results, plot_name):
     F = {a:i for (i,a) in enumerate(Funds)}
     U_plot = np.array([[F[policy[t,w_map(s)]] for t in range(T)] for s in S if s<=G*1.5])
     U_plot[w_map(G)-10:w_map(G)+10,:] = -1 #Draw G
@@ -786,7 +799,7 @@ def plot_policy_and_sim(T, S, w_map, policy, Funds, G, sim_results):
     plt.show()
 
 
-def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results):
+def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plot_name):
     
     #basic_cols = ['red', 'yellow','cyan', 'lime', 'blue']
     basic_cols = ['red', 'blue', 'lime', 'magenta', 'yellow']
@@ -810,7 +823,7 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results):
         
 
     cmap = colors.ListedColormap(policy_colors)
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(20, 20), dpi=600)
     steps_displayed = len(U_plot)
     im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(actions)-1)
     im2 = ax.imshow(U_plot2, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(actions)-1, alpha=0.8)
@@ -824,12 +837,17 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results):
     #values = [F[a] for a in funds]
     cols = basic_cols#[ im.cmap(im.norm(value)) for value in values]
     patches = [ mpatches.Patch(color=cols[i], label="Fund {l}".format(l=funds[i]) ) for i in range(len(funds)) ]
-#    ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0. )
-    fig.colorbar(im)
+    if plot_name == 'Default':
+        ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0.2 )
+    #fig.colorbar(im)
     ax.set_xlabel('Years')
     ax.set_ylabel('Wealth ($USD)')
     plt.tight_layout() 
-    plt.show()
+    plt.savefig('./PensionFunds/Plots/%s.pdf' %(plot_name), bbox_inches = 'tight', pad_inches = 0)
+    pp = PdfPages('./PensionFunds/Plots/%s.pdf' %(plot_name))
+    pp.savefig(fig)
+    pp.close()
+    #plt.show()
 
     #Plot of the leyend
 #    L_plot = []
@@ -941,7 +959,16 @@ def fit_returns(data):
         print(fm(0.5))
    
     return marginals, dist_names
-        
+  
+
+def run_default(T,r,w_delta,max_wealth): 
+    S, A, F, w_map, steps  = setup(T,r,w_delta,max_wealth)
+    def_pol = create_default_policy(T,w_delta,max_wealth)
+    Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %("Default"))
+    #plot_simulation(Default_sim_results, def_pol, style=1)
+    plot_policy_and_sim2(T ,S, w_map,  def_pol, Funds, A, G, Default_sim_results, 'Default')
+    return def_pol, Default_sim_results
+    
 if __name__ == '__main__':
     T = 40 
     R = 18
@@ -954,7 +981,8 @@ if __name__ == '__main__':
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
     
     df = 0.98
-    steps = 5001
+    w_delta = 100
+    max_wealth = 2E6
     #returns
     
     file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
@@ -964,17 +992,18 @@ if __name__ == '__main__':
     Funds = ['A','B','C','D','E']
     monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds}
     data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds]).transpose()
+   
     
     
-    if False: #Show correlogram
-        data_df = pd.DataFrame(data=data, columns=Funds)
-        for f in data_df.columns:
-            plot_pacf(data_df[f], lags=24)
-    invs_marginals, marg_names= fit_returns(data)
+#    if False: #Show correlogram
+#        data_df = pd.DataFrame(data=data, columns=Funds)
+#        for f in data_df.columns:
+#            plot_pacf(data_df[f], lags=24)
+#    invs_marginals, marg_names= fit_returns(data)
     
     #norta_data = fit_NORTA(data,len(data),len(data[0]), F_invs=invs_marginals)
     #pickle.dump( norta_data.C, open('./norta_obj.pickle', 'wb'), pickle.HIGHEST_PROTOCOL)
-    norta_c_matrix = pickle.load(open('./norta_obj.pickle', 'rb'))
+    norta_c_matrix = pickle.load(open('./PensionFunds/norta_obj.pickle', 'rb'))
     F_invs = [build_empirical_inverse_cdf(np.sort(data[:,i])) for i in range(len(Funds))]
     #F_invs = invs_marginals
     norta_data = NORTA(F_invs ,norta_c_matrix )
@@ -1002,7 +1031,7 @@ if __name__ == '__main__':
     print([(np.mean(r[a])-rf)/np.std(r[a]) for a in Funds])
     #plt.scatter([np.std(r[a]) for a in Funds] , [np.mean(r[a]) for a in Funds] )
     
-    
+   
     
     np.random.seed(0)
     replicas = 10000
@@ -1016,89 +1045,80 @@ if __name__ == '__main__':
             for (i,a) in enumerate(Funds):
                 simulated_returns[k,t,i] = r_sim[a][r_index]
  
-        
-    V,U,S,w_map,A = backward_induction_mix(T,G,df,rf,r,I0,c, steps , cvar=False)
-    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("DP-utility"))
-    #plot_simulation(DP_sim_results, U, style=1)
-    plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results )
+    default_policy, default_sim = run_default(T,r,w_delta,max_wealth) 
+    Y =  np.array([sr[-1] for sr in default_sim])
+    a = adsd*3
+    
+    
+    #plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
+    
+#    V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps , cvar=True)
+#    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("DP shortfall"))
+#    #plot_simulation(DP_sim_results, U, style=1)
+#    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results )
+#    
+#    plot_policies_comparizon(('Default', Default_sim_results),('DP shortfall', DP_sim_results), G)
+#    
+#    
+#    
+#    Y = simulation(T,def_pol,w_map,simulated_returns,I0,c, 1000, policy_name="%10s" %("Default-Benchmarck"))
+#    Y =  np.array([sr[-1] for sr in Y])
+#    
+#    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps , Y, sdd_tail=False)
+#    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("SSD"))
+#    #plot_simulation(DP_sim_results, U, style=1)
+#    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
+#    
+#    plot_policies_comparizon(('Default', Default_sim_results),('SSD', DP_sim_results), G)
+#    
+#    pY = np.percentile(Y,q=5)
+#    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps*4 , Y, sdd_tail=True)
+#    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('SSD-Tail'))
+#    #plot_simulation(DP_sim_results, U, style=1)
+#    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
+#    plot_policies_comparizon(('Default', Default_sim_results),('CVaR-Quadratic', DP_sim_results), G)
+#   
+#    
+#    plot_policies_comparizon(('Default', Default_sim_results),('SSD-Tail', DP_sim_results), G)
+    
+    
    
-       
-    def_pol = create_default_policy(S,T)#{(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=34 else 'D')) for t in range(T) for s in S}
-    Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %("Default"))
-    #plot_simulation(Default_sim_results, def_pol, style=1)
-    plot_policy_and_sim2(T ,S, w_map,  def_pol, Funds, A, G, Default_sim_results )
-    
-    
-#    def_pol = {(t,w_map(s)):('E' if t<=15 else ('A' if 15<t<=25 else ('E' if 25<t<=30 else ('E' if 30<t<=33 else 'E')))) for t in range(T) for s in S}
-#    Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %("Default"))
-#    #plot_simulation(Default_sim_results, def_pol, style=1)
-#    plot_policy_and_sim(T ,S, w_map,  def_pol, Funds, G, Default_sim_results )
-    
-    
-    plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
-    
-    V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps , cvar=True)
-    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("DP shortfall"))
-    #plot_simulation(DP_sim_results, U, style=1)
-    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results )
-    
-    plot_policies_comparizon(('Default', Default_sim_results),('DP shortfall', DP_sim_results), G)
-    
-    
-    
-    Y = simulation(T,def_pol,w_map,simulated_returns,I0,c, 1000, policy_name="%10s" %("Default-Benchmarck"))
-    Y =  np.array([sr[-1] for sr in Y])
-    
-    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps , Y, sdd_tail=False)
-    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("SSD"))
-    #plot_simulation(DP_sim_results, U, style=1)
-    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
-    
-    plot_policies_comparizon(('Default', Default_sim_results),('SSD', DP_sim_results), G)
-    
-    pY = np.percentile(Y,q=5)
-    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps*4 , Y, sdd_tail=True)
-    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('SSD-Tail'))
-    #plot_simulation(DP_sim_results, U, style=1)
-    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
-    plot_policies_comparizon(('Default', Default_sim_results),('CVaR-Quadratic', DP_sim_results), G)
-   
-    
-    plot_policies_comparizon(('Default', Default_sim_results),('SSD-Tail', DP_sim_results), G)
-    
-    
-    Y = simulation(T,def_pol,w_map,simulated_returns,I0,c, 10000, policy_name="%10s" %("Default-Benchmarck"))
-    Y =  np.array([sr[-1] for sr in Y])
    
  
-    tnow = time()
-    V,U,S,w_map,A = backward_induction_sd_mix(T,G,df,rf,r,I0,c, steps , Y, ssd_tail=False)
-    print(time()-tnow)
-    tnow = time()
-    V,U,S,w_map,A = backward_induction_sd_mix_par(T,G,rf,r,I0,c, steps , Y, method=ALG_UTILITY , ssd_tail=False)
-    print(time()-tnow)    
-    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('CVaR_Q'))
-    #plot_simulation(DP_sim_results, U, style=1)
-    plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results)
-    
-    get_investment_profiles(DP_sim_results, U, w_map,T,A, Funds)
-    
-    methods_dp = [ALG_UTILITY, ALG_SSD,ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY]
+#    tnow = time()
+#    V,U,S,w_map,A = backward_induction_sd_mix(T,G,df,rf,r,I0,c, steps , Y, ssd_tail=False)
+#    print(time()-tnow)
+#    tnow = time()
+#    V,U,S,w_map,A = backward_induction_sd_mix_par(T,G,rf,r,I0,c, steps , Y, method=ALG_UTILITY , ssd_tail=False)
+#    print(time()-tnow)    
+#    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('CVaR_Q'))
+#    #plot_simulation(DP_sim_results, U, style=1)
+#    plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results)
+#    
+   
+    setup_data = setup(T,r,w_delta,max_wealth)
+    methods_dp = [ ALG_SSD,ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY] # ALG_UTILITY
     sols_DP = {}
     for m in methods_dp:
-        dp_out = backward_induction_sd_mix_par(T,G,rf,r,I0,c, Y, w_delta=100, method=m , n_threads=4)
-        V,U,S,w_map,A = dp_out
+        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y, w_delta=w_delta, method=m , n_threads=4)
+        V,U = dp_out
+        w_map = setup_data[3]
         DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
-        plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results)
         sols_DP[m] = (dp_out, DP_sim_results)
         
-    plt.subplots()
-    for t in range(T):
-        plt.plot(V[t,:])
-    for a in Funds:
-        policy_a = {(t,w_map(s)):a for t in range(T) for s in S}
-        sim_results = simulation(T,policy_a,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %(a))
-        #plot_policy_and_sim(T ,S, w_map,  policy_a, Funds, G, sim_results )
-        plot_policies_comparizon((a, sim_results),('', []), G)
+    S, A, F, w_map, steps = setup_data
+    
+    for m in methods_dp:
+        dp_out, DP_sim_results = sols_DP[m] 
+        V,U = dp_out
+        plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results, m)
+        #get_investment_profiles(DP_sim_results, U, w_map,T,A, Funds)
+#    for t in range(T):
+#        plt.plot(V[t,:])
+#    for a in Funds:
+#        policy_a = {(t,w_map(s)):a for t in range(T) for s in S}
+#        sim_results = simulation(T,policy_a,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %(a))
+#        #plot_policy_and_sim(T ,S, w_map,  policy_a, Funds, G, sim_results )
+#        plot_policies_comparizon((a, sim_results),('', []), G)
 
 
