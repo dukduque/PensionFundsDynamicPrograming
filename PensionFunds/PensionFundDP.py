@@ -390,7 +390,7 @@ def setup(T, r, w_delta=100, max_wealth=2E6):
     S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
     return S, A, F, w_map, steps
 
-def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, w_delta=100, max_wealth=2E6, method=ALG_UTILITY, n_threads=1):
+def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_policy=None, w_delta=100, max_wealth=2E6, method=ALG_UTILITY, n_threads=1):
     '''
     Runs backward induction to find the optimal policy of a dynamic
     asset allocation problem. This method implements a parralle version
@@ -415,11 +415,21 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, w_delt
     
     V = np.zeros((T+1,steps))
     U = {}
+    r_mat = np.zeros((len(F),len(r[F[0]])))
+    for (i,ai) in enumerate(F):
+        r_mat[i,:]= r[ai]
+    act_ret = A.dot(r_mat)
+    
     #R = np.eye(steps) #PMF of final wealth
     var_val, cvarY, Yq,  Ytail, SDD_constant = None, None, None, None, None
     if type(Y)!=type(None):
         var_val = 0.30
-        cvarY = cvar(-Y,var_val)
+        cvarY = {}
+        
+        for (i,s) in enumerate(S):
+            newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I*(1+rf)**(T-1))
+            cvarY[s] = cvar(-newY,var_val) 
+        #cvarY = cvar(-Y,var_val) 
         Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
         Ytail=Yq[Yq<G]
         if method == ALG_SSD_MINMAX:
@@ -427,11 +437,6 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, w_delt
             SSD =  np.maximum(Yq - YY.transpose(), 0 )
             SDD_constant = SSD.mean(0)
     
-    
-    r_mat = np.zeros((len(F),len(r[F[0]])))
-    for (i,ai) in enumerate(F):
-        r_mat[i,:]= r[ai]
-    act_ret = A.dot(r_mat)
     
     for (i,s) in enumerate(S):
         assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
@@ -511,9 +516,9 @@ def dp_parallel(dp_data):
             elif method == ALG_CVAR_PENALTY:
                 cvarX = cvar(-X[k],var_val)
                 v_a =df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
-                if cvarX > cvarY:
+                if cvarX > cvarY[s]:
                     #v_a = v_a  - 100*(cvarX-cvarY)
-                    v_a = v_a  - (cvarX-cvarY)**2
+                    v_a = v_a  - (cvarX-cvarY[s])**2
             elif method == ALG_UTILITY:
                 v_a = df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
             else:
@@ -1071,7 +1076,7 @@ if __name__ == '__main__':
     default_policy, default_sim = run_default(T,r,w_delta,max_wealth) 
     Y =  np.array([sr[-1] for sr in default_sim])
     sols_DP = {'Default':(default_policy, default_sim)}
-    #a = das232
+        #a = das232
     #plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
     
 #    V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps , cvar=True)
@@ -1119,10 +1124,10 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX, ALG_CVAR_PENALTY]  
+    methods_dp = [ALG_CVAR_PENALTY, ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
     
     for m in methods_dp:
-        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y, w_delta=w_delta, method=m , n_threads=4)
+        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , n_threads=4)
         V,U = dp_out
         w_map = setup_data[3]
         DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
@@ -1139,7 +1144,7 @@ if __name__ == '__main__':
     #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
     #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/*.pickle ./PensionFunds/
     for m in methods_dp:
-        dp_out, DP_sim_results = sols_DP[m] 
+        dp_out, DP_sim_results = sols_DP[m]
         V,U = dp_out
         plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results, m)
         #get_investment_profiles(DP_sim_results, U, w_map,T,A, Funds)
@@ -1153,72 +1158,73 @@ if __name__ == '__main__':
 
 
 
-dp_name = ALG_SSD_MINMAX
-
+if False:
+    dp_name = ALG_SSD_MINMAX
     
-def_wealth = np.array([sols_DP['Default'][1][k][-1] for k in range(len(sols_DP['Default'][1]))])
-uti_wealth = np.array([sols_DP[dp_name][1][k][-1] for k in range(len(sols_DP[dp_name][1]))])
-
-
-
-
-valid_reps = uti_wealth<G
-valid_reps1 = def_wealth<G
-total = valid_reps *  valid_reps1
-
-len(def_wealth[valid_reps1])
-
-valid_map = []
-for i in range(len(valid_reps)):
-    if valid_reps[i]:
-        valid_map.append(i)
         
-
-wealth_diff = uti_wealth[valid_reps] - def_wealth[valid_reps]
-#wealth_diff = uti_wealth - def_wealth
-best_def_replica = valid_map[np.argmin(wealth_diff)]
-basic_cols = ['red', 'blue', 'lime', 'magenta', 'yellow']
-fig, ax = plt.subplots()
-ax.grid(True)
-for (i,colf) in enumerate(basic_cols):
-    ax.plot(simulated_returns[best_def_replica,:,i], color=colf)
-
-
-
-bins = 50
-wealth_diff1 = np.copy(wealth_diff)
-wealth_diff1.sort()
-heights,bins = np.histogram(wealth_diff1,bins=bins)
-n_pdf = 10000
-fig, ax = plt.subplots()
-hist_dist1 = scipy.stats.rv_histogram((heights,bins))
-X = np.linspace(wealth_diff1[0], wealth_diff1[-1], n_pdf)
-max_p1 = np.max(hist_dist1.pdf(X))
-ax.fill_between(X,hist_dist1.pdf(X),np.zeros_like(X),  alpha=0.5)
-
-
-policy = sols_DP[dp_name][0][1]
-def_pol = sols_DP['Default'][0]
-basic_cols_rgs = np.array([col.to_rgb(c) for c in basic_cols])
-policy_colors = A.dot(basic_cols_rgs)
-actions_str = [str(pc) for pc in A]
-F_map = {a:i for (i,a) in enumerate(actions_str)}
-U_plot = np.zeros((2,T))
-def_pol_acts = np.array([def_pol[t,w_map(sols_DP[dp_name][1][best_def_replica][t])] for t in range(T)])
-dp_pol_acts = np.array([policy[t,w_map(sols_DP[dp_name][1][best_def_replica][t])] for t in range(T)])
-U_plot[0] = np.array([F_map[str(def_pol[t,w_map(sols_DP[dp_name][1][best_def_replica][t])])] for t in range(T)])
-U_plot[1] = np.array([F_map[str(policy[t,w_map(sols_DP[dp_name][1][best_def_replica][t])])] for t in range(T)])
-cmap = colors.ListedColormap(policy_colors)
-fig, ax = plt.subplots()
-steps_displayed = len(U_plot)
-im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=0, vmax=len(A)-1)
- # We want to show all ticks...
-ax.set_xticks(np.arange(0,T+1,5))
-y_ticks = np.arange(0,len(quantiles),1)
-ax.set_yticks([0 , 1 ])
-ax.set_yticklabels(['Default', 'DP'])
-
-fig, ax = plt.subplots()
-ax.plot(sols_DP[dp_name][1][best_def_replica] , label='DP')
-ax.plot(sols_DP['Default'][1][best_def_replica] , label='Default')
-ax.legend( loc=2)
+    def_wealth = np.array([sols_DP['Default'][1][k][-1] for k in range(len(sols_DP['Default'][1]))])
+    uti_wealth = np.array([sols_DP[dp_name][1][k][-1] for k in range(len(sols_DP[dp_name][1]))])
+    
+    
+    
+    
+    valid_reps = uti_wealth<G
+    valid_reps1 = def_wealth<G
+    total = valid_reps *  valid_reps1
+    
+    len(def_wealth[valid_reps1])
+    
+    valid_map = []
+    for i in range(len(valid_reps)):
+        if valid_reps[i]:
+            valid_map.append(i)
+            
+    
+    wealth_diff = uti_wealth[valid_reps] - def_wealth[valid_reps]
+    #wealth_diff = uti_wealth - def_wealth
+    best_def_replica = valid_map[np.argmin(wealth_diff)]
+    basic_cols = ['red', 'blue', 'lime', 'magenta', 'yellow']
+    fig, ax = plt.subplots()
+    ax.grid(True)
+    for (i,colf) in enumerate(basic_cols):
+        ax.plot(simulated_returns[best_def_replica,:,i], color=colf)
+    
+    
+    
+    bins = 50
+    wealth_diff1 = np.copy(wealth_diff)
+    wealth_diff1.sort()
+    heights,bins = np.histogram(wealth_diff1,bins=bins)
+    n_pdf = 10000
+    fig, ax = plt.subplots()
+    hist_dist1 = scipy.stats.rv_histogram((heights,bins))
+    X = np.linspace(wealth_diff1[0], wealth_diff1[-1], n_pdf)
+    max_p1 = np.max(hist_dist1.pdf(X))
+    ax.fill_between(X,hist_dist1.pdf(X),np.zeros_like(X),  alpha=0.5)
+    
+    
+    policy = sols_DP[dp_name][0][1]
+    def_pol = sols_DP['Default'][0]
+    basic_cols_rgs = np.array([col.to_rgb(c) for c in basic_cols])
+    policy_colors = A.dot(basic_cols_rgs)
+    actions_str = [str(pc) for pc in A]
+    F_map = {a:i for (i,a) in enumerate(actions_str)}
+    U_plot = np.zeros((2,T))
+    def_pol_acts = np.array([def_pol[t,w_map(sols_DP[dp_name][1][best_def_replica][t])] for t in range(T)])
+    dp_pol_acts = np.array([policy[t,w_map(sols_DP[dp_name][1][best_def_replica][t])] for t in range(T)])
+    U_plot[0] = np.array([F_map[str(def_pol[t,w_map(sols_DP[dp_name][1][best_def_replica][t])])] for t in range(T)])
+    U_plot[1] = np.array([F_map[str(policy[t,w_map(sols_DP[dp_name][1][best_def_replica][t])])] for t in range(T)])
+    cmap = colors.ListedColormap(policy_colors)
+    fig, ax = plt.subplots()
+    steps_displayed = len(U_plot)
+    im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=0, vmax=len(A)-1)
+     # We want to show all ticks...
+    ax.set_xticks(np.arange(0,T+1,5))
+    y_ticks = np.arange(0,len(quantiles),1)
+    ax.set_yticks([0 , 1 ])
+    ax.set_yticklabels(['Default', 'DP'])
+    
+    fig, ax = plt.subplots()
+    ax.plot(sols_DP[dp_name][1][best_def_replica] , label='DP')
+    ax.plot(sols_DP['Default'][1][best_def_replica] , label='Default')
+    ax.legend( loc=2)
