@@ -429,15 +429,13 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
         for (i,s) in enumerate(S):
             newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I*(1+rf)**(T-1))
             cvarY[s] = cvar(-newY,var_val) 
-            if 50000 < s < 250000 and s % 500 == 0:
-                print( '%10f %10f %10f %10f %10f' %(s, len(newY)+0.0,  np.mean(newY),  np.std(newY), cvarY[s]))
         #cvarY = cvar(-Y,var_val) 
-        Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
-        Ytail=Yq[Yq<G]
-        if method == ALG_SSD_MINMAX:
+        Yq = None#np.percentile(Y,q=[i for i in range(0,101)],axis=0)
+        Ytail=None #Yq[Yq<G]
+        if method == ALG_SSD_MINMAX+"a":
             YY = np.tile(Yq, (len(Yq), 1))
             SSD =  np.maximum(Yq - YY.transpose(), 0 )
-            SDD_constant = SSD.mean(0)
+            SDD_constant = None # SSD.mean(0)
     
     
     for (i,s) in enumerate(S):
@@ -455,7 +453,7 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
         I_t = I*(1+rf)**t
         print('solving ', t, ' ' , I_t)
         #Launch parallelization for each possible state
-        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val])
+        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy], [r_mat])
         out_par = p.map(dp_parallel,par_data)
         V[t,:] = np.array([par_res[0] for par_res in out_par])
         for (i,s) in enumerate(S):
@@ -486,7 +484,8 @@ def dp_parallel(dp_data):
     SDD_constant = dp_data[12]
     cvarY = dp_data[13]
     var_val = dp_data[14]
-    
+    Y_policy = dp_data[15]
+    r_mat = dp_data[16]
     '''
     ================================
     Solve DP for state s and time t
@@ -496,6 +495,17 @@ def dp_parallel(dp_data):
     V_s = -np.inf
     X = s*(1+act_ret)+c*I_t
     Xind = w_map(X)
+    
+    if t >= T-1:
+        if method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX]:
+            newY =  s*(1+Y_policy[t,s_index].dot(r_mat))+c*I_t
+            Yq = np.percentile(newY,q=[i for i in range(0,101)],axis=0)
+            Ytail = Yq[Yq<G]
+            if method == ALG_SSD_MINMAX:
+                YY = np.tile(Yq, (len(Yq), 1))
+                SSD =  np.maximum(Yq - YY.transpose(), 0 )
+                SDD_constant = SSD.mean(0)
+      
     for (k,a) in enumerate(Actions):
         v_a = None
         s_a_i = Xind[k]
@@ -521,8 +531,6 @@ def dp_parallel(dp_data):
                 if cvarX > cvarY[s]:
                     #v_a = v_a  - 100*(cvarX-cvarY)
                     v_a = v_a  - (cvarX-cvarY[s])**2
-                if 50000 < s < 250000 and s % 500 == 0:
-                    print( 'XXXXXX %10f %10f %10f %10f %10f %10f' %(s, len(X[k])+0.0,  np.mean(X[k]),  np.std(X[k]), cvarX , cvarY[s] ))
             elif method == ALG_UTILITY:
                 v_a = df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
             else:
@@ -873,7 +881,7 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
     pp = PdfPages(plot_file)
     pp.savefig(fig)
     pp.close()
-    plt.show()
+    #plt.show()
     
 
 # scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
@@ -1011,8 +1019,8 @@ if __name__ == '__main__':
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
     
 
-    w_delta = 50
-    max_wealth = 3E6
+    w_delta = 200
+    max_wealth = 7E5
     #returns
     
     file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
@@ -1128,7 +1136,7 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_CVAR_PENALTY]#[ALG_CVAR_PENALTY, ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
+    methods_dp = [ALG_SSD_MINMAX]#[ALG_CVAR_PENALTY, ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
     
     for m in methods_dp:
         dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , n_threads=4)
@@ -1144,13 +1152,14 @@ if __name__ == '__main__':
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
     
     #Read solution 
-    #PF_path = '/Users/dduque/Dropbox/WORKSPACE/PorfolioOpt/PensionFunds/'
-    #out_path = os.path.join(PF_path,'all_policies_out.pickle' )
-    #read_out = pickle.load(open(out_path, 'rb')) 
-    #S, A, F, T,r,w_delta,max_wealth ,simulated_returns, sols_DP = read_out
-    #w_map = w_index(w_delta, max_wealth,len(S))
-    #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
-    #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/*.pickle ./PensionFunds/
+    if False:
+        PF_path = '/Users/dduque/Dropbox/WORKSPACE/PorfolioOpt/PensionFunds/'
+        out_path = os.path.join(PF_path,'all_policies_out.pickle' )
+        read_out = pickle.load(open(out_path, 'rb')) 
+        S, A, F, T,r,w_delta,max_wealth ,simulated_returns, sols_DP = read_out
+        w_map = w_index(w_delta, max_wealth,len(S))
+        #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
+        #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/*.pickle ./PensionFunds/
     for m in methods_dp:
         dp_out, DP_sim_results = sols_DP[m]
         V,U = dp_out
@@ -1190,7 +1199,7 @@ if False:
     
     wealth_diff = uti_wealth[valid_reps] - def_wealth[valid_reps]
     #wealth_diff = uti_wealth - def_wealth
-    best_def_replica = valid_map[np.argmin(wealth_diff)]
+    best_def_replica = valid_map[np.argmin(uti_wealth)]
     basic_cols = ['red', 'blue', 'lime', 'magenta', 'yellow']
     fig, ax = plt.subplots()
     ax.grid(True)
