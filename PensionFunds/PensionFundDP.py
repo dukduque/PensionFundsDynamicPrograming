@@ -565,6 +565,22 @@ def cvar(x, alp):
     var_alp=np.percentile(x, q = int(alp*100))
     return x[x>=var_alp].mean()
 
+def check_SSD(X,Y):
+    '''
+    Checks the fraction of constraints that satisfy that
+    X dominates Y in the second order stochastic.
+    '''
+    ny = len(Y)
+    n_ctr = 0 
+    for i in range(ny):
+        Yi = Y[i]
+        EXmax = np.mean(np.maximum(Yi - X, 0))
+        EYmax = np.mean(np.maximum(Yi - Y, 0))
+        if EXmax <= EYmax:
+            n_ctr +=1
+    
+    return n_ctr/ny
+    
 def create_default_policy(T,w_delta,max_wealth):
     '''
     Creates the defaul policy for chilean system. This policy uses funds
@@ -848,6 +864,7 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
     pp = PdfPages(plot_file)
     pp.savefig(fig)
     pp.close()
+    plt.show()
     
 
 # scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
@@ -929,7 +946,8 @@ def get_investment_profiles(sim_result, policy, w_map, T, A, funds,  quantiles=[
     ax.set_ylabel('Simulation Quantiles')
     plt.tight_layout()
     plt.show()
-    
+
+   
 def create_marginal_fun(best_dist, best_params):
     dist = getattr(st, best_dist)
     def marginal_inv(q):
@@ -1112,12 +1130,14 @@ if __name__ == '__main__':
     
     S, A, F, w_map, steps = setup_data 
     
-    all_policies_out  = (S, A, F, T,r,w_delta,max_wealth , sols_DP)
+    all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
     out_path = os.path.join(PF_path,'all_policies_out.pickle' )
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
     #read_out = pickle.load(open(out_path, 'rb'))
-    
-    
+    #S, A, F, T,r,w_delta,max_wealth ,simulated_returns, sols_DP = read_out
+    #w_map = w_index(w_delta, max_wealth,len(S))
+    #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
+    #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/*.pickle ./PensionFunds/
     for m in methods_dp:
         dp_out, DP_sim_results = sols_DP[m] 
         V,U = dp_out
@@ -1132,3 +1152,73 @@ if __name__ == '__main__':
 #        plot_policies_comparizon((a, sim_results),('', []), G)
 
 
+
+dp_name = ALG_SSD_MINMAX
+
+    
+def_wealth = np.array([sols_DP['Default'][1][k][-1] for k in range(len(sols_DP['Default'][1]))])
+uti_wealth = np.array([sols_DP[dp_name][1][k][-1] for k in range(len(sols_DP[dp_name][1]))])
+
+
+
+
+valid_reps = uti_wealth<G
+valid_reps1 = def_wealth<G
+total = valid_reps *  valid_reps1
+
+len(def_wealth[valid_reps1])
+
+valid_map = []
+for i in range(len(valid_reps)):
+    if valid_reps[i]:
+        valid_map.append(i)
+        
+
+wealth_diff = uti_wealth[valid_reps] - def_wealth[valid_reps]
+#wealth_diff = uti_wealth - def_wealth
+best_def_replica = valid_map[np.argmin(wealth_diff)]
+basic_cols = ['red', 'blue', 'lime', 'magenta', 'yellow']
+fig, ax = plt.subplots()
+ax.grid(True)
+for (i,colf) in enumerate(basic_cols):
+    ax.plot(simulated_returns[best_def_replica,:,i], color=colf)
+
+
+
+bins = 50
+wealth_diff1 = np.copy(wealth_diff)
+wealth_diff1.sort()
+heights,bins = np.histogram(wealth_diff1,bins=bins)
+n_pdf = 10000
+fig, ax = plt.subplots()
+hist_dist1 = scipy.stats.rv_histogram((heights,bins))
+X = np.linspace(wealth_diff1[0], wealth_diff1[-1], n_pdf)
+max_p1 = np.max(hist_dist1.pdf(X))
+ax.fill_between(X,hist_dist1.pdf(X),np.zeros_like(X),  alpha=0.5)
+
+
+policy = sols_DP[dp_name][0][1]
+def_pol = sols_DP['Default'][0]
+basic_cols_rgs = np.array([col.to_rgb(c) for c in basic_cols])
+policy_colors = A.dot(basic_cols_rgs)
+actions_str = [str(pc) for pc in A]
+F_map = {a:i for (i,a) in enumerate(actions_str)}
+U_plot = np.zeros((2,T))
+def_pol_acts = np.array([def_pol[t,w_map(sols_DP[dp_name][1][best_def_replica][t])] for t in range(T)])
+dp_pol_acts = np.array([policy[t,w_map(sols_DP[dp_name][1][best_def_replica][t])] for t in range(T)])
+U_plot[0] = np.array([F_map[str(def_pol[t,w_map(sols_DP[dp_name][1][best_def_replica][t])])] for t in range(T)])
+U_plot[1] = np.array([F_map[str(policy[t,w_map(sols_DP[dp_name][1][best_def_replica][t])])] for t in range(T)])
+cmap = colors.ListedColormap(policy_colors)
+fig, ax = plt.subplots()
+steps_displayed = len(U_plot)
+im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=0, vmax=len(A)-1)
+ # We want to show all ticks...
+ax.set_xticks(np.arange(0,T+1,5))
+y_ticks = np.arange(0,len(quantiles),1)
+ax.set_yticks([0 , 1 ])
+ax.set_yticklabels(['Default', 'DP'])
+
+fig, ax = plt.subplots()
+ax.plot(sols_DP[dp_name][1][best_def_replica] , label='DP')
+ax.plot(sols_DP['Default'][1][best_def_replica] , label='Default')
+ax.legend( loc=2)
