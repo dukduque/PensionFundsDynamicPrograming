@@ -15,7 +15,7 @@ sys.path.append(parent_path)
 
 import numpy as np
 import matplotlib
-matplotlib.use('agg')
+#matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
@@ -429,6 +429,8 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
         for (i,s) in enumerate(S):
             newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I*(1+rf)**(T-1))
             cvarY[s] = cvar(-newY,var_val) 
+            if 50000 < s < 250000 and s % 500 == 0:
+                print( '%10f %10f %10f %10f %10f' %(s, len(newY)+0.0,  np.mean(newY),  np.std(newY), cvarY[s]))
         #cvarY = cvar(-Y,var_val) 
         Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
         Ytail=Yq[Yq<G]
@@ -519,6 +521,8 @@ def dp_parallel(dp_data):
                 if cvarX > cvarY[s]:
                     #v_a = v_a  - 100*(cvarX-cvarY)
                     v_a = v_a  - (cvarX-cvarY[s])**2
+                if 50000 < s < 250000 and s % 500 == 0:
+                    print( 'XXXXXX %10f %10f %10f %10f %10f %10f' %(s, len(X[k])+0.0,  np.mean(X[k]),  np.std(X[k]), cvarX , cvarY[s] ))
             elif method == ALG_UTILITY:
                 v_a = df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
             else:
@@ -1124,7 +1128,7 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_CVAR_PENALTY, ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
+    methods_dp = [ALG_CVAR_PENALTY]#[ALG_CVAR_PENALTY, ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
     
     for m in methods_dp:
         dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , n_threads=4)
@@ -1138,7 +1142,11 @@ if __name__ == '__main__':
     all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
     out_path = os.path.join(PF_path,'all_policies_out.pickle' )
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
-    #read_out = pickle.load(open(out_path, 'rb'))
+    
+    #Read solution 
+    #PF_path = '/Users/dduque/Dropbox/WORKSPACE/PorfolioOpt/PensionFunds/'
+    #out_path = os.path.join(PF_path,'all_policies_out.pickle' )
+    #read_out = pickle.load(open(out_path, 'rb')) 
     #S, A, F, T,r,w_delta,max_wealth ,simulated_returns, sols_DP = read_out
     #w_map = w_index(w_delta, max_wealth,len(S))
     #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
@@ -1159,7 +1167,7 @@ if __name__ == '__main__':
 
 
 if False:
-    dp_name = ALG_SSD_MINMAX
+    dp_name = ALG_CVAR_PENALTY
     
         
     def_wealth = np.array([sols_DP['Default'][1][k][-1] for k in range(len(sols_DP['Default'][1]))])
@@ -1168,7 +1176,7 @@ if False:
     
     
     
-    valid_reps = uti_wealth<G
+    valid_reps = uti_wealth<G+1E10
     valid_reps1 = def_wealth<G
     total = valid_reps *  valid_reps1
     
