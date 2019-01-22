@@ -388,6 +388,7 @@ def setup(T, r, w_delta=100, max_wealth=2E6):
     A = np.array(A)
     w_map = w_index(w_delta, max_wealth,steps)
     S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
+    print(len(S) , ' states' )
     return S, A, F, w_map, steps
 
 def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_policy=None, w_delta=100, max_wealth=2E6, method=ALG_UTILITY, n_threads=1):
@@ -425,7 +426,6 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
     if type(Y)!=type(None):
         var_val = 0.30
         cvarY = {}
-        
         for (i,s) in enumerate(S):
             newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I*(1+rf)**(T-1))
             cvarY[s] = cvar(-newY,var_val) 
@@ -543,33 +543,6 @@ def dp_parallel(dp_data):
     return V_s, arg_max 
 
 
-
-def action_value(action_data):
-    method = action_data[0]
-    X = action_data[0]
-    
-    if t >= T-1:
-        if method == ALG_SSD:
-            if ssd_tail:
-                XX = np.tile(X[k], (len(Ytail), 1))
-                SSD =  np.maximum(Ytail - XX.transpose(), 0 )
-                SDD_mean = SSD.mean(0)
-                v_a = -SDD_mean.sum()
-            else:
-                XX = np.tile(X[k], (len(Yq), 1))
-                SSD =  np.maximum(Yq - XX.transpose(), 0 )
-                SDD_mean = SSD.mean(0)
-                v_a = -np.max(SDD_mean - SDD_constant)
-        elif method == ALG_CVAR_PENALTY:
-            cvarX = cvar(-X[k],var_val)
-            v_a =df*(1/len(s_a_i))*np.sum(V[t+1,s_a_i]) #Expectation
-            if cvarX > cvarY:
-                #v_a = v_a  - 100*(cvarX-cvarY)
-                v_a = v_a  - (cvarX-cvarY)**2
-        else:
-            raise 'unimplemented method'
-    else:
-        v_a = df*(1/len(s_a_i))*np.sum(V[t+1,s_a_i]) #Expectation
 
 def cvar(x, alp):
     '''
@@ -1019,8 +992,8 @@ if __name__ == '__main__':
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
     
 
-    w_delta = 200
-    max_wealth = 7E5
+    w_delta = 100
+    max_wealth = 1E6
     #returns
     
     file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
@@ -1136,7 +1109,7 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_SSD_MINMAX]#[ALG_CVAR_PENALTY, ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
+    methods_dp = [ALG_SSD]#[ALG_CVAR_PENALTY, ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
     
     for m in methods_dp:
         dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , n_threads=4)
@@ -1157,18 +1130,24 @@ if __name__ == '__main__':
         out_path = os.path.join(PF_path,'all_policies_out.pickle' )
         read_out = pickle.load(open(out_path, 'rb')) 
         S, A, F, T,r,w_delta,max_wealth ,simulated_returns, sols_DP = read_out
+        methods_dp = sols_DP.keys()
         w_map = w_index(w_delta, max_wealth,len(S))
         #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
         #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/*.pickle ./PensionFunds/
     for m in methods_dp:
         dp_out, DP_sim_results = sols_DP[m]
-        V,U = dp_out
-        plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results, m)
+        
+        if m != 'Default':
+            V,U = dp_out
+        #    simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
+            plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results, m)
+        
+        
         #get_investment_profiles(DP_sim_results, U, w_map,T,A, Funds)
 #    for t in range(T):
 #        plt.plot(V[t,:])
 #    for a in Funds:
-#        policy_a = {(t,w_map(s)):a for t in range(T) for s in S}
+#        policy_a = {(t,w_map(s)):[1,0,0,0,0] for t in range(T) for s in S}
 #        sim_results = simulation(T,policy_a,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %(a))
 #        #plot_policy_and_sim(T ,S, w_map,  policy_a, Funds, G, sim_results )
 #        plot_policies_comparizon((a, sim_results),('', []), G)
@@ -1176,7 +1155,7 @@ if __name__ == '__main__':
 
 
 if False:
-    dp_name = ALG_CVAR_PENALTY
+    dp_name = ALG_SSD_TAIL
     
         
     def_wealth = np.array([sols_DP['Default'][1][k][-1] for k in range(len(sols_DP['Default'][1]))])
@@ -1185,7 +1164,7 @@ if False:
     
     
     
-    valid_reps = uti_wealth<G+1E10
+    valid_reps = uti_wealth<G*0.7
     valid_reps1 = def_wealth<G
     total = valid_reps *  valid_reps1
     
@@ -1199,7 +1178,7 @@ if False:
     
     wealth_diff = uti_wealth[valid_reps] - def_wealth[valid_reps]
     #wealth_diff = uti_wealth - def_wealth
-    best_def_replica = valid_map[np.argmin(uti_wealth)]
+    best_def_replica = valid_map[np.argmin(wealth_diff)]
     basic_cols = ['red', 'blue', 'lime', 'magenta', 'yellow']
     fig, ax = plt.subplots()
     ax.grid(True)
@@ -1242,6 +1221,6 @@ if False:
     ax.set_yticklabels(['Default', 'DP'])
     
     fig, ax = plt.subplots()
-    ax.plot(sols_DP[dp_name][1][best_def_replica] , label='DP')
+    ax.plot(sols_DP[dp_name][1][best_def_replica] , label='DP') 
     ax.plot(sols_DP['Default'][1][best_def_replica] , label='Default')
     ax.legend( loc=2)
