@@ -380,7 +380,7 @@ def setup(T, r, w_delta=100, max_wealth=2E6):
         A.append(ac)
         for (j,aj) in enumerate(F):
             if j>i:
-                for alp in [0.05*i for i in range(1,20)]:
+                for alp in [0.2,0.4,0.6,0.8]:#[0.05*i for i in range(1,20)]:
                     ac = np.zeros(len(F))
                     ac[i] = 1-alp
                     ac[j] = alp
@@ -388,10 +388,9 @@ def setup(T, r, w_delta=100, max_wealth=2E6):
     A = np.array(A)
     w_map = w_index(w_delta, max_wealth,steps)
     S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
-    print(len(S) , ' states' )
     return S, A, F, w_map, steps
 
-def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_policy=None, w_delta=100, max_wealth=2E6, method=ALG_UTILITY, n_threads=1):
+def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_policy=None, w_delta=100, max_wealth=2E6, method=ALG_UTILITY, method_cond=False, n_threads=1):
     '''
     Runs backward induction to find the optimal policy of a dynamic
     asset allocation problem. This method implements a parralle version
@@ -423,19 +422,24 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
     
     #R = np.eye(steps) #PMF of final wealth
     var_val, cvarY, Yq,  Ytail, SDD_constant = None, None, None, None, None
-    if type(Y)!=type(None):
+    if type(Y)!=type(None) and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX, ALG_CVAR_PENALTY]:
         var_val = 0.30
         cvarY = {}
+        cvarY_unconditioned = cvar(-Y,var_val)  
         for (i,s) in enumerate(S):
-            newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I*(1+rf)**(T-1))
-            cvarY[s] = cvar(-newY,var_val) 
+            if method_cond:
+                newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I*(1+rf)**(T-1))
+                cvarY[s] = cvar(-newY,var_val)  
+            else:
+                cvarY[s] = cvarY_unconditioned
         #cvarY = cvar(-Y,var_val) 
-        Yq = None#np.percentile(Y,q=[i for i in range(0,101)],axis=0)
-        Ytail=None #Yq[Yq<G]
-        if method == ALG_SSD_MINMAX+"a":
-            YY = np.tile(Yq, (len(Yq), 1))
-            SSD =  np.maximum(Yq - YY.transpose(), 0 )
-            SDD_constant = None # SSD.mean(0)
+        if method_cond == False:
+            Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
+            Ytail= Yq[Yq<G]
+            if method == ALG_SSD_MINMAX+"a":
+                YY = np.tile(Yq, (len(Yq), 1))
+                SSD =  np.maximum(Yq - YY.transpose(), 0 )
+                SDD_constant = SSD.mean(0)
     
     
     for (i,s) in enumerate(S):
@@ -453,7 +457,7 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
         I_t = I*(1+rf)**t
         print('solving ', t, ' ' , I_t)
         #Launch parallelization for each possible state
-        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy], [r_mat])
+        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy[T-1,0]], [r_mat])
         out_par = p.map(dp_parallel,par_data)
         V[t,:] = np.array([par_res[0] for par_res in out_par])
         for (i,s) in enumerate(S):
@@ -484,7 +488,7 @@ def dp_parallel(dp_data):
     SDD_constant = dp_data[12]
     cvarY = dp_data[13]
     var_val = dp_data[14]
-    Y_policy = dp_data[15]
+    Y_policy = dp_data[15] #Static policy of the benchmark
     r_mat = dp_data[16]
     '''
     ================================
@@ -496,15 +500,14 @@ def dp_parallel(dp_data):
     X = s*(1+act_ret)+c*I_t
     Xind = w_map(X)
     
-    if t >= T-1:
-        if method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX]:
-            newY =  s*(1+Y_policy[t,s_index].dot(r_mat))+c*I_t
-            Yq = np.percentile(newY,q=[i for i in range(0,101)],axis=0)
-            Ytail = Yq[Yq<G]
-            if method == ALG_SSD_MINMAX:
-                YY = np.tile(Yq, (len(Yq), 1))
-                SSD =  np.maximum(Yq - YY.transpose(), 0 )
-                SDD_constant = SSD.mean(0)
+    if t >= T-1 and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX] and type(Yq)==type(None):
+        newY =  s*(1+Y_policy.dot(r_mat))+c*I_t
+        Yq = np.percentile(newY,q=[i for i in range(0,101)],axis=0)
+        Ytail = Yq[Yq<G]
+        if method == ALG_SSD_MINMAX:
+            YY = np.tile(Yq, (len(Yq), 1))
+            SSD =  np.maximum(Yq - YY.transpose(), 0 )
+            SDD_constant = SSD.mean(0)
       
     for (k,a) in enumerate(Actions):
         v_a = None
@@ -993,7 +996,7 @@ if __name__ == '__main__':
     
 
     w_delta = 100
-    max_wealth = 1E6
+    max_wealth = 3E6
     #returns
     
     file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
@@ -1109,10 +1112,10 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_SSD]#[ALG_CVAR_PENALTY, ALG_UTILITY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
+    methods_dp = [ALG_UTILITY, ALG_CVAR_PENALTY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
     
     for m in methods_dp:
-        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , n_threads=4)
+        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , method_cond=False, n_threads=35)
         V,U = dp_out
         w_map = setup_data[3]
         DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
@@ -1122,6 +1125,19 @@ if __name__ == '__main__':
     
     all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
     out_path = os.path.join(PF_path,'all_policies_out.pickle' )
+    pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
+
+    for m in methods_dp:
+        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , method_cond=True, n_threads=35)
+        V,U = dp_out
+        w_map = setup_data[3]
+        DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
+        sols_DP[m] = (dp_out, DP_sim_results)
+    
+    S, A, F, w_map, steps = setup_data 
+    
+    all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
+    out_path = os.path.join(PF_path,'all_policies_out_cond.pickle' )
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
     
     #Read solution 
