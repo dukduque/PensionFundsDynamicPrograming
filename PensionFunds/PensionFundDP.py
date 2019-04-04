@@ -22,6 +22,7 @@ import matplotlib.patches as mpatches
 import matplotlib.colors as col
 from matplotlib import colors 
 from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.mlab as mlab
 import scipy.stats
 import scipy.stats as st
 import pandas as pd
@@ -55,15 +56,15 @@ def utility_function(x, G):
 #        return s2*(x - G)
     
     
-#    u_gamma = 0.2
-#    return (x/G)**u_gamma
-    side_g = x<G
-    exp_param = -0.1
-    numerator = 101
-    denominator = 100
-    left = numerator/(denominator+np.exp((x-G)/(exp_param*G)))
-    right = np.exp((x-G)/G)
-    return left#side_g*left + (1-side_g)*right
+    u_gamma = 0.1
+    return (1/(1-u_gamma))*(x/G)**(1-u_gamma)
+#    side_g = x<G
+#    exp_param = -0.1
+#    numerator = 101
+#    denominator = 100
+#    left = numerator/(denominator+np.exp((x-G)/(exp_param*G)))
+#    right = np.exp((x-G)/G)
+#    return left#side_g*left + (1-side_g)*right
  
     
 
@@ -380,7 +381,7 @@ def setup(T, r, w_delta=100, max_wealth=2E6):
         A.append(ac)
         for (j,aj) in enumerate(F):
             if j>i:
-                for alp in [0.2,0.4,0.6,0.8]:#[0.05*i for i in range(1,20)]:
+                for alp in [0.05*i for i in range(1,20)]:
                     ac = np.zeros(len(F))
                     ac[i] = 1-alp
                     ac[j] = alp
@@ -436,7 +437,7 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
         if method_cond == False:
             Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
             Ytail= Yq[Yq<G]
-            if method == ALG_SSD_MINMAX+"a":
+            if method == ALG_SSD_MINMAX:
                 YY = np.tile(Yq, (len(Yq), 1))
                 SSD =  np.maximum(Yq - YY.transpose(), 0 )
                 SDD_constant = SSD.mean(0)
@@ -863,30 +864,31 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
 # scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
 
     #Plot of the leyend
-#    L_plot = []
-#    pairs = [(i,j) for (i,f1) in enumerate(funds) for (j,f2) in enumerate(funds) if i<j]
-#    for alp in [0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1]:
-#        L_plot.append([])
-#        for (i,j) in pairs:  
-#            ac = np.zeros(len(funds))
-#            ac[i] = 1-alp
-#            ac[j] = alp
-#            ac_map = F[str(ac)]
-#            L_plot[-1].append(ac_map)
-#    L_plot = np.array(L_plot)
-#    cmap = colors.ListedColormap(actions.dot(basic_cols_rgs))
-#    fig, ax = plt.subplots()
-#    steps_displayed = len(U_plot)
-#    im = ax.imshow(L_plot, cmap=cmap,  interpolation='none', aspect='auto' ,origin='lower', vmin=0, vmax=len(actions)-1)
-#    ax.set_xticks(np.arange(0,len(pairs),1))
-#    ax.set_xticklabels(["%s-%s" %(funds[p[0]],funds[p[1]]) for p in pairs])
-#    ax.set_yticks(np.arange(0,11,1))
-#    ax.set_yticklabels(np.arange(0,11,1)/10)
-#    plt.tight_layout()
-#    plt.show()
+    L_plot = []
+    pairs = [(i,j) for (i,f1) in enumerate(funds) for (j,f2) in enumerate(funds) if i<j]
+    for alp in [0.05*i for i in range(0,21)]:
+        L_plot.append([])
+        for (i,j) in pairs:  
+            ac = np.zeros(len(funds))
+            ac[i] = 1-alp
+            ac[j] = alp
+            ac_map = F[str(ac)]
+            L_plot[-1].append(ac_map)
+    L_plot = np.array(L_plot)
+    cmap = colors.ListedColormap(actions.dot(basic_cols_rgs))
+    fig, ax = plt.subplots()
+    steps_displayed = len(U_plot)
+    im = ax.imshow(L_plot, cmap=cmap,  interpolation='none', aspect='auto' ,origin='lower', vmin=0, vmax=len(actions)-1)
+    ax.set_xticks(np.arange(0,len(pairs),1))
+    ax.set_xticklabels(["%s-%s" %(funds[p[0]],funds[p[1]]) for p in pairs])
+    ax.set_yticks(np.arange(0,21,1))
+    ax.set_yticklabels(np.arange(0,21,1)/20)
+    plt.tight_layout()
+    plt.show()
     
-    
-#    show_steps = int(steps/2)
+#==============================================================================
+# #    show_steps = int(steps/2)
+#==============================================================================
 #    X = {}
 #    Y = {}
 #    for a in Funds:
@@ -1112,10 +1114,10 @@ if __name__ == '__main__':
 #    
    
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_UTILITY, ALG_CVAR_PENALTY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
+    methods_dp = []#[ALG_UTILITY, ALG_CVAR_PENALTY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
     
     for m in methods_dp:
-        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , method_cond=False, n_threads=35)
+        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , method_cond=False, n_threads=4)
         V,U = dp_out
         w_map = setup_data[3]
         DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
@@ -1126,7 +1128,7 @@ if __name__ == '__main__':
     all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
     out_path = os.path.join(PF_path,'all_policies_out.pickle' )
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
-
+    methods_dp = []
     for m in methods_dp:
         dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , method_cond=True, n_threads=35)
         V,U = dp_out
@@ -1150,13 +1152,13 @@ if __name__ == '__main__':
         w_map = w_index(w_delta, max_wealth,len(S))
         #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
         #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/*.pickle ./PensionFunds/
-    for m in methods_dp:
-        dp_out, DP_sim_results = sols_DP[m]
-        
-        if m != 'Default':
-            V,U = dp_out
-        #    simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
-            plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results, m)
+        for m in methods_dp:
+            dp_out, DP_sim_results = sols_DP[m]
+            
+            if m != 'Default':
+                V,U = dp_out
+            #    simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
+                plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, m)
         
         
         #get_investment_profiles(DP_sim_results, U, w_map,T,A, Funds)
@@ -1180,7 +1182,7 @@ if False:
     
     
     
-    valid_reps = uti_wealth<G*0.7
+    valid_reps = uti_wealth<G
     valid_reps1 = def_wealth<G
     total = valid_reps *  valid_reps1
     
@@ -1203,16 +1205,19 @@ if False:
     
     
     
-    bins = 50
+    bins = 10
     wealth_diff1 = np.copy(wealth_diff)
     wealth_diff1.sort()
     heights,bins = np.histogram(wealth_diff1,bins=bins)
     n_pdf = 10000
     fig, ax = plt.subplots()
-    hist_dist1 = scipy.stats.rv_histogram((heights,bins))
-    X = np.linspace(wealth_diff1[0], wealth_diff1[-1], n_pdf)
-    max_p1 = np.max(hist_dist1.pdf(X))
-    ax.fill_between(X,hist_dist1.pdf(X),np.zeros_like(X),  alpha=0.5)
+    ax.hist(wealth_diff,bins=50, weights=np.zeros_like(wealth_diff) + 1. / wealth_diff.size)
+    ax.set_xlabel('Wealth difference (SSD-tail- Default)')
+    ax.set_ylabel('Frequency')
+#    hist_dist1 = scipy.stats.rv_histogram((heights,bins))
+#    X = np.linspace(wealth_diff1[0], wealth_diff1[-1], n_pdf)
+#    max_p1 = np.max(hist_dist1.pdf(X))
+#    ax.fill_between(X,hist_dist1.pdf(X),np.zeros_like(X),  alpha=0.5)
     
     
     policy = sols_DP[dp_name][0][1]
@@ -1234,9 +1239,55 @@ if False:
     ax.set_xticks(np.arange(0,T+1,5))
     y_ticks = np.arange(0,len(quantiles),1)
     ax.set_yticks([0 , 1 ])
-    ax.set_yticklabels(['Default', 'DP'])
+    ax.set_yticklabels(['Default', 'SSD-Tail'])
+    ax.set_xlabel('Years')
+    #ax.set_ylabel('Policy')
+    plt.show()
     
     fig, ax = plt.subplots()
     ax.plot(sols_DP[dp_name][1][best_def_replica] , label='DP') 
     ax.plot(sols_DP['Default'][1][best_def_replica] , label='Default')
     ax.legend( loc=2)
+    ax.set_xlabel('Years')
+    ax.set_ylabel('Wealth ($USD)')
+    plt.tight_layout()
+    
+    #Conditinal distributions plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    mu = def_wealth.mean()
+    variance = def_wealth.var()
+    sigma = np.sqrt(variance)
+    x = np.linspace(mu - 4*sigma, mu + 4*sigma, 1000)
+    ax.plot(x,mlab.normpdf(x, mu, sigma), label='Default density')
+    #density for dp policy
+    uti_wealthT = np.array([sols_DP[dp_name][1][k][-2] for k in range(len(sols_DP[dp_name][1]))])
+    sT_high = 1.5*G*(1+r['A']) + 21647.44*c
+    sT_med = G*1.0*(1+r['A']) + 21647.44*c
+    sT_low = G*0.7*(1+r['A']) + 21647.44*c
+    ax.plot(x,mlab.normpdf(x, sT_low.mean(), sT_low.std()), label='SSD low')
+    ax.plot(x,mlab.normpdf(x, sT_med.mean(), sT_med.std()), label='SSD medium')
+    ax.plot(x,mlab.normpdf(x, sT_high.mean(), sT_high.std()), label='SSD high')
+    ax.set_xlabel('Wealth at stage T+1' ,fontsize=12)
+    ax.set_ylabel('Frequency' ,fontsize=12)
+    ax.legend( loc='best')
+    plt.tight_layout()
+    
+    
+    fig, ax = plt.subplots()
+    mu = def_wealth.mean()
+    variance = def_wealth.var()
+    sigma = np.sqrt(variance)
+    x = np.linspace(mu - 4*sigma, mu + 4*sigma, 1000)
+    ax.plot(x,mlab.normcdf(x, mu, sigma), label='Default density')
+    #density for dp policy
+    uti_wealthT = np.array([sols_DP[dp_name][1][k][-2] for k in range(len(sols_DP[dp_name][1]))])
+    sT_high = 1.5*G*(1+r['A']) + 21647.44*c
+    sT_med = G*1.0*(1+r['A']) + 21647.44*c
+    sT_low = G*0.7*(1+r['A']) + 21647.44*c
+    ax.plot(x,mlab.normcdf(x, sT_low.mean(), sT_low.std()), label='SSD low')
+    ax.plot(x,mlab.normcdf(x, sT_med.mean(), sT_med.std()), label='SSD medium')
+    ax.plot(x,mlab.normcdf(x, sT_high.mean(), sT_high.std()), label='SSD high')
+    ax.set_xlabel('Wealth at stage T+1')
+    ax.set_ylabel('Frequency')
+    ax.legend( loc='best')
+    plt.tight_layout()
