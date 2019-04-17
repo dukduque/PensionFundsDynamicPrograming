@@ -105,8 +105,8 @@ if __name__ == '__main__':
     out_path = os.path.join(PF_path,'%s.pickle' %(policy_name_params))
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
   
-    pf.plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, method)
-    pf.plot_policies_comparizon(('Default', sols_DP['Default'][1]),(method, DP_sim_results), G)
+    #pf.plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, method)
+    #pf.plot_policies_comparizon(('Default', sols_DP['Default'][1]),(method, DP_sim_results), G)
     
     
     
