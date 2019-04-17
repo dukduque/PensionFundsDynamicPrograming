@@ -55,7 +55,7 @@ if __name__ == '__main__':
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
     
     w_delta = 100
-    max_wealth = 6E5
+    max_wealth = 3E6
     
 
     '''
