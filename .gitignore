@@ -3,5 +3,5 @@
 *.log
 *.DS_Store
 *.pickle
-*.p
 *.ini
+*.pyc

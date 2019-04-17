@@ -23,6 +23,12 @@ import matplotlib.colors as col
 from matplotlib import colors 
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.mlab as mlab
+from matplotlib import rc
+#Set up font for latex
+rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
+## for Palatino and other serif fonts use:
+#rc('font',**{'family':'serif','serif':['Palatino']})
+rc('text', usetex=True)
 import scipy.stats
 import scipy.stats as st
 import pandas as pd
@@ -35,39 +41,31 @@ import multiprocessing as mp
 from itertools import product
 from time import time
 
-ALG_UTILITY = 'utility'
-ALG_CVAR_PENALTY = 'cvar_penalty'
+ALG_UTILITY_POWER = 'utility_power'
+ALG_UTILITY_SIGMO = 'utility_sigmoidal'
+ALG_CVAR_PENALTY_LIN = 'cvar_l'
+ALG_CVAR_PENALTY_QUA = 'cvar_q'
 ALG_SSD = 'ssd'
-ALG_SSD_TAIL= 'ssd tail'
-ALG_SSD_MINMAX='ssd_minamx'
+ALG_SSD_TAIL= 'ssd_tail'
+ALG_SSD_MINMAX='ssd_minmax'
 
+ALG_CHOICES = [ALG_UTILITY_POWER,ALG_UTILITY_SIGMO,ALG_CVAR_PENALTY_LIN,ALG_CVAR_PENALTY_QUA,ALG_SSD,ALG_SSD_TAIL,ALG_SSD_MINMAX]
 
-def utility_function(x, G):
+def utility_function(x, G, power, *args):
     '''
     params:
         x (float): wealth
         G (float): target wealth
     '''
-#    s1 = 10
-#    s2 = 1
-#    if x<=G:
-#        return s1*(x-G) 
-#    else:
-#        return s2*(x - G)
-    
-    
-    u_gamma = 0.1
-    return (1/(1-u_gamma))*(x/G)**(1-u_gamma)
-#    side_g = x<G
-#    exp_param = -0.1
-#    numerator = 101
-#    denominator = 100
-#    left = numerator/(denominator+np.exp((x-G)/(exp_param*G)))
-#    right = np.exp((x-G)/G)
-#    return left#side_g*left + (1-side_g)*right
+    if power:
+        u_gamma = args[0]
+        return (1/(1-u_gamma))*(x/G)**(1-u_gamma)
+    else:    
+        c1 = args[0] #101
+        c2 = args[1] #100
+        c3 = args[2] #-0.1
+        return 1/(c1+np.exp(-c2*(x/G)+c3))
  
-    
-
 def w_index(w_delta, max_wealth, steps):
     def f(x):
         p = np.floor(x/w_delta) # np.round(x,0)/w_delta
@@ -76,298 +74,6 @@ def w_index(w_delta, max_wealth, steps):
         p = p.astype(int)
         return p
     return f 
-    
-
-def backward_induction(T, G , df, rf, r, I, c , steps, cvar = False):
-    '''
-    Runs backward induction to find the optimal policy of selecting 
-    a fund at each time period give a particular amounth of wealth.
-    '''
-    assert df<1
-    max_wealth = np.round(3*G,-3) - (np.round(3*G,-3) % (steps-1))
-    w_delta = int(max_wealth/(steps-1)) 
-    V = np.zeros((T+1,steps))
-    U = {}
-    
-    
-    
-    A = r.keys()
-    w_map = w_index(w_delta, max_wealth,steps)
-    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
-    
-    for (i,s) in enumerate(S):
-        assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
-    
-    # Value in the last stage
-    V[T,:] = utility_function(S,G) 
-
-    for t in np.arange(T-1, -1, -1):
-        I_t = I*(1+rf)**t
-        print('solving ', t, ' ' , I_t)
-        for s in S:
-            #print('s=',w_map(s), ' ', s)
-            s_index = w_map(s)
-            arg_max = None
-            V_s = -np.inf
-            for a in A:
-                v_a = None
-                if t == T-1 and cvar==True: #CVAR
-                    s_a_i = w_map((s)*(1+r[a])+c*I_t)
-                    r_money = V[t+1,s_a_i]
-                    shortfall = np.maximum(1-r_money,0)
-                    if len(shortfall)>0:
-                        v_a = -shortfall.mean() #Shortfall bellow G
-                    else:
-                        v_a = 0
-                else:
-                    s_a_i = w_map((s)*(1+r[a])+c*I_t)
-                    v_a = df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
-                if v_a>=V_s: #Choose less risk of alternative optima
-                    V_s = v_a
-                    arg_max = a
-            V[t,s_index] = V_s
-            U[t,s_index] = arg_max    
-    return V,U,S,w_map
-
-def backward_induction_mix(T, G , df, rf, r, I, c , steps, cvar = False):
-    '''
-    Runs backward induction to find the optimal policy of selecting 
-    a fund at each time period give a particular amounth of wealth.
-    '''
-    assert df<1
-    max_wealth = np.round(3*G,-3) - (np.round(3*G,-3) % (steps-1))
-    w_delta = int(max_wealth/(steps-1)) 
-    V = np.zeros((T+1,steps))
-    U = {}
-    
-    
-    A = r.keys()
-    A = list(A)
-    A.sort()
-    Actions = [] 
-    r_mat = np.zeros((len(A),len(r[A[0]])))
-    for (i,ai) in enumerate(A):
-        ac = np.zeros(len(A))
-        ac[i] = 1
-        Actions.append(ac)
-        r_mat[i,:]= r[ai]
-        for (j,aj) in enumerate(A):
-            if j>i:
-                for alp in [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
-                    ac = np.zeros(len(A))
-                    ac[i] = alp
-                    ac[j] = 1-alp
-                    Actions.append(ac)
-    Actions = np.array(Actions)
-    act_ret = Actions.dot(r_mat)
-    w_map = w_index(w_delta, max_wealth,steps)
-    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
-    
-    for (i,s) in enumerate(S):
-        assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
-    
-    # Value in the last stage
-    V[T,:] = utility_function(S,G) 
-
-    for t in np.arange(T-1, -1, -1):
-        I_t = I*(1+rf)**t
-        print('solving ', t, ' ' , I_t)
-        for s in S:
-            s_index = w_map(s)
-            arg_max = None
-            V_s = -np.inf
-            for (k,a) in enumerate(Actions):
-                v_a = None
-                s_a_i = w_map((s)*(1+act_ret[k])+c*I_t)
-                v_a = (1/len(act_ret[k]))*np.sum(V[t+1,s_a_i]) #Expectation
-                if v_a>=V_s: #Choose less risk of alternative optima
-                    V_s = v_a
-                    arg_max = a
-            V[t,s_index] = V_s
-            U[t,s_index] = arg_max    
-    return V,U,S,w_map,Actions
-
-
-
-
-def backward_induction_sd(T, G , df, rf, r, I, c , steps, Y, sdd_tail = False):
-    '''
-    Runs backward induction to find the optimal policy of selecting 
-    a fund at each time period give a particular amounth of wealth.
-    Stochastic domiance variant
-    
-    Y (ndarray): realizations of the benchmark
-    '''
-    assert df<1
-    max_wealth = np.round(10*G,-3) - (np.round(10*G,-3) % (steps-1))
-    w_delta = int(max_wealth/(steps-1)) 
-    V = np.zeros((T+1,steps))
-    U = {}
-    #R = np.eye(steps) #PMF of final wealth
-    var_val = 0.30
-    cvarY = cvar(-Y,var_val)
-    
-    A = r.keys()
-    w_map = w_index(w_delta, max_wealth,steps)
-    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
-    
-    for (i,s) in enumerate(S):
-        assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
-    
-    # Value in the last stage
-    V[T,:] = S# utility_function(S,G) 
-    
-
-    for t in np.arange(T-1, -1, -1):
-        I_t = I*(1+rf)**t
-        #Rt= np.zeros_like(R) #PMF of final wealth at t
-        print('solving ', t, ' ' , I_t)
-        for s in S:
-            #print('s=',w_map(s), ' ', s)
-            s_index = w_map(s)
-            arg_max = None
-            V_s = -np.inf
-            #nR = None
-            for a in A:
-                v_a = None
-                if t >= T-1:
-                    s_a_i = w_map((s)*(1+r[a])+c*I_t)
-                    X = S[s_a_i]
-#                    XX = np.tile(X, (len(Y), 1))
-#                    SSD =  np.maximum(Y - XX.transpose(), 0 )
-#                    SDD_mean = SSD.mean(0)
-#                    if sdd_tail:
-#                        v_a = -SDD_mean[Y<G].sum()
-#                    else:
-#                        v_a = -SDD_mean.sum()
-                    cvarX = cvar(-X,var_val)
-                    v_a =df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
-                    if cvarX > cvarY:
-                        #v_a = v_a  - 100*(cvarX-cvarY)
-                        v_a = v_a  - (cvarX-cvarY)**2
-                else:
-                    s_a_i = w_map((s)*(1+r[a])+c*I_t)
-                    v_a = df*(1/len(r[a]))*np.sum(V[t+1,s_a_i]) #Expectation
-                if v_a>=V_s: #Choose less risk of alternative optima
-                    V_s = v_a
-                    arg_max = a
-                    #nR = R[s_a_i,:].sum(0)
-                    #nR = nR/nR.sum()
-            V[t,s_index] = V_s
-            U[t,s_index] = arg_max 
-            #Rt[s_index,:] = nR
-        #R = np.copy(Rt)
-    return V,U,S,w_map
-
-
-
-def backward_induction_sd_mix(T, G , df, rf, r, I, c , steps, Y, method='ssd', ssd_tail = False):
-    '''
-    Runs backward induction to find the optimal policy of selecting 
-    a fund at each time period give a particular amounth of wealth.
-    Stochastic domiance variant
-    
-    Y (ndarray): realizations of the benchmark
-    '''
-    
-    max_welath_multiple = 5
-    max_wealth = np.round(max_welath_multiple*G,-3) - (np.round(max_welath_multiple*G,-3) % (steps-1))
-    w_delta = int(max_wealth/(steps-1)) 
-    V = np.zeros((T+1,steps))
-    U = {}
-    #R = np.eye(steps) #PMF of final wealth
-    var_val = 0.30
-    cvarY = cvar(-Y,var_val)
-    Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
-    Ytail=Yq[Yq<G]
-    SDD_constant = None
-    if ssd_tail == False:
-        YY = np.tile(Yq, (len(Yq), 1))
-        SSD =  np.maximum(Yq - YY.transpose(), 0 )
-        SDD_constant = SSD.mean(0)
-    
-    
-    
-    A = r.keys()
-    A = list(A)
-    A.sort()
-    Actions = [] 
-    r_mat = np.zeros((len(A),len(r[A[0]])))
-    for (i,ai) in enumerate(A):
-        ac = np.zeros(len(A))
-        ac[i] = 1
-        Actions.append(ac)
-        r_mat[i,:]= r[ai]
-        for (j,aj) in enumerate(A):
-            if j>i:
-                for alp in [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
-                    ac = np.zeros(len(A))
-                    ac[i] = alp
-                    ac[j] = 1-alp
-                    Actions.append(ac)
-    Actions = np.array(Actions)
-    act_ret = Actions.dot(r_mat)
-    w_map = w_index(w_delta, max_wealth,steps)
-    S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
-    
-    for (i,s) in enumerate(S):
-        assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
-    
-    # Value in the last stage
-    V[T,:] = S# utility_function(S,G) 
-    
-
-
-    for t in np.arange(T-1, -1, -1):
-        I_t = I*(1+rf)**t
-        #Rt= np.zeros_like(R) #PMF of final wealth at t
-        print('solving ', t, ' ' , I_t)
-        tnow = time()
-        for s in S:
-            #print('s=',w_map(s), ' ', s)
-            s_index = w_map(s)
-            arg_max = None
-            V_s = -np.inf
-            #nR = None
-            X = s*(1+act_ret)+c*I_t
-            Xind = w_map(X)
-            
-            for (k,a) in enumerate(Actions):
-                v_a = None
-                s_a_i = Xind[k]
-                if t >= T-1:
-                    if method == ALG_SSD:
-                        if ssd_tail:
-                            XX = np.tile(X[k], (len(Ytail), 1))
-                            SSD =  np.maximum(Ytail - XX.transpose(), 0 )
-                            SDD_mean = SSD.mean(0)
-                            v_a = -SDD_mean.sum()
-                        else:
-                            XX = np.tile(X[k], (len(Yq), 1))
-                            SSD =  np.maximum(Yq - XX.transpose(), 0 )
-                            SDD_mean = SSD.mean(0)
-                            v_a = -np.max(SDD_mean - SDD_constant)
-                    elif method == ALG_CVAR_PENALTY:
-                        cvarX = cvar(-X[k],var_val)
-                        v_a =df*(1/len(s_a_i))*np.sum(V[t+1,s_a_i]) #Expectation
-                        if cvarX > cvarY:
-                            #v_a = v_a  - 100*(cvarX-cvarY)
-                            v_a = v_a  - (cvarX-cvarY)**2
-                    else:
-                        raise 'unimplemented method'
-                else:
-                    v_a = df*(1/len(s_a_i))*np.sum(V[t+1,s_a_i]) #Expectation
-                if v_a>=V_s: #Choose less risk of alternative optima
-                    V_s = v_a
-                    arg_max = a
-                    #nR = R[s_a_i,:].sum(0)
-                    #nR = nR/nR.sum()
-            V[t,s_index] = V_s
-            U[t,s_index] = arg_max 
-            #Rt[s_index,:] = nR
-        print(time()-tnow)
-        #R = np.copy(Rt)
-    return V,U,S,w_map,Actions
 
 def setup(T, r, w_delta=100, max_wealth=2E6):
     steps = int(max_wealth/w_delta)
@@ -391,7 +97,7 @@ def setup(T, r, w_delta=100, max_wealth=2E6):
     S = np.array([i*w_delta for i in range(steps) if i*w_delta<=max_wealth])
     return S, A, F, w_map, steps
 
-def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_policy=None, w_delta=100, max_wealth=2E6, method=ALG_UTILITY, method_cond=False, n_threads=1):
+def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=None, method=None, method_params = None,  method_cond=False, n_threads=1):
     '''
     Runs backward induction to find the optimal policy of a dynamic
     asset allocation problem. This method implements a parralle version
@@ -412,7 +118,8 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
     print('Runing DP with %s and %i threads' %(method, n_threads))
     
     tnow = time()
-    S, A, F, w_map, steps = setupData
+    T, R, rf, df, I0, c, w, G, w_delta, max_wealth = problem_data
+    S, A, F, w_map, steps = dp_data
     
     V = np.zeros((T+1,steps))
     U = {}
@@ -422,43 +129,48 @@ def backward_induction_sd_mix_par(T, setupData, G , rf, r, I, c , Y=None, Y_poli
     act_ret = A.dot(r_mat)
     
     #R = np.eye(steps) #PMF of final wealth
-    var_val, cvarY, Yq,  Ytail, SDD_constant = None, None, None, None, None
-    if type(Y)!=type(None) and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX, ALG_CVAR_PENALTY]:
-        var_val = 0.30
+    beta_cvx, var_val, cvarY, Yq,  Ytail, SDD_constant = None, None, None, None, None, None
+    if type(Y)!=type(None) and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX, ALG_CVAR_PENALTY_LIN, ALG_CVAR_PENALTY_QUA]:
+        beta_cvx = method_params[0]
+        var_val = method_params[1]
         cvarY = {}
         cvarY_unconditioned = cvar(-Y,var_val)  
         for (i,s) in enumerate(S):
             if method_cond:
-                newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I*(1+rf)**(T-1))
+                newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I0*(1+rf)**(T-1))
                 cvarY[s] = cvar(-newY,var_val)  
             else:
                 cvarY[s] = cvarY_unconditioned
         #cvarY = cvar(-Y,var_val) 
         if method_cond == False:
             Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
-            Ytail= Yq[Yq<G]
-            if method == ALG_SSD_MINMAX:
-                YY = np.tile(Yq, (len(Yq), 1))
-                SSD =  np.maximum(Yq - YY.transpose(), 0 )
-                SDD_constant = SSD.mean(0)
+            Ytail= Yq[Yq<=G]
+            YY = np.tile(Yq, (len(Yq), 1))
+            SSD =  np.maximum(Yq - YY.transpose(), 0 )
+            SDD_constant = SSD.mean(0)
+            if method == ALG_SSD_TAIL:
+                SDD_constant = SDD_constant[Yq<=G]
     
-    
+    print('Method parameters: ' , method_params)
+
     for (i,s) in enumerate(S):
         assert w_map(s)==i, "NUMS %i %i %i" %(i,s,w_map(s))
     
     # Value in the last stage
-    if method == ALG_UTILITY:
-        V[T,:] = utility_function(S,G) 
+    if method == ALG_UTILITY_POWER:
+        V[T,:] = utility_function(S, G, True, *method_params ) 
+    if method == ALG_UTILITY_SIGMO:
+        V[T,:] = utility_function(S, G, False, *method_params) 
     else:
         V[T,:] = S# utility_function(S,G) 
 
     p  = mp.Pool(n_threads)
 
     for t in np.arange(T-1, -1, -1):
-        I_t = I*(1+rf)**t
+        I_t = I0*(1+rf)**t
         print('solving ', t, ' ' , I_t)
         #Launch parallelization for each possible state
-        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy[T-1,0]], [r_mat])
+        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy[T-1,0]], [r_mat], [beta_cvx])
         out_par = p.map(dp_parallel,par_data)
         V[t,:] = np.array([par_res[0] for par_res in out_par])
         for (i,s) in enumerate(S):
@@ -491,6 +203,7 @@ def dp_parallel(dp_data):
     var_val = dp_data[14]
     Y_policy = dp_data[15] #Static policy of the benchmark
     r_mat = dp_data[16]
+    beta_cvx = dp_data[17]
     '''
     ================================
     Solve DP for state s and time t
@@ -504,43 +217,51 @@ def dp_parallel(dp_data):
     if t >= T-1 and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX] and type(Yq)==type(None):
         newY =  s*(1+Y_policy.dot(r_mat))+c*I_t
         Yq = np.percentile(newY,q=[i for i in range(0,101)],axis=0)
-        Ytail = Yq[Yq<G]
-        if method == ALG_SSD_MINMAX:
-            YY = np.tile(Yq, (len(Yq), 1))
-            SSD =  np.maximum(Yq - YY.transpose(), 0 )
-            SDD_constant = SSD.mean(0)
-      
+        Ytail = Yq[Yq<=G]
+        YY = np.tile(Yq, (len(Yq), 1))
+        SSD =  np.maximum(Yq - YY.transpose(), 0)
+        SDD_constant = SSD.mean(0)
+        print('Tamano SSD Y ' , len(SDD_constant))
+    
     for (k,a) in enumerate(Actions):
         v_a = None
         s_a_i = Xind[k]
         if t >= T-1:
+            exp_v = (1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
             if method == ALG_SSD:
                 XX = np.tile(X[k], (len(Yq), 1))
-                SSD =  np.maximum(Yq - XX.transpose(), 0 )
+                SSD =  np.maximum(Yq - XX.transpose(), 0)
                 SDD_mean = SSD.mean(0)
-                v_a = -SDD_mean.sum()
+                SSD_violations =  np.maximum(0, SDD_mean - SDD_constant)
+                v_a = beta_cvx * exp_v - (1-beta_cvx) * SSD_violations.sum()
             elif method == ALG_SSD_TAIL:
+                assert len(Ytail)==len(SDD_constant), 'SSD constant vector has a different dimension'
                 XX = np.tile(X[k], (len(Ytail), 1))
-                SSD =  np.maximum(Ytail - XX.transpose(), 0 )
+                SSD =  np.maximum(Ytail - XX.transpose(), 0)
                 SDD_mean = SSD.mean(0)
-                v_a = -SDD_mean.sum()
+                SSD_violations =  np.maximum(0, SDD_mean - SDD_constant)
+                v_a = beta_cvx * exp_v - (1-beta_cvx) * SSD_violations.sum()
             elif method == ALG_SSD_MINMAX:
                 XX = np.tile(X[k], (len(Yq), 1))
-                SSD =  np.maximum(Yq - XX.transpose(), 0 )
+                SSD =  np.maximum(Yq - XX.transpose(), 0)
                 SDD_mean = SSD.mean(0)
-                v_a = -np.max(SDD_mean - SDD_constant)
-            elif method == ALG_CVAR_PENALTY:
+                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.max(SDD_mean - SDD_constant)
+            elif method == ALG_CVAR_PENALTY_LIN:
                 cvarX = cvar(-X[k],var_val)
-                v_a =df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
-                if cvarX > cvarY[s]:
-                    #v_a = v_a  - 100*(cvarX-cvarY)
-                    v_a = v_a  - (cvarX-cvarY[s])**2
-            elif method == ALG_UTILITY:
-                v_a = df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
+                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.maximum(0,cvarX-cvarY[s])
+                #if cvarX > cvarY[s]:
+                #    v_a = v_a  - 100*(cvarX-cvarY[s])
+            elif method == ALG_CVAR_PENALTY_QUA:
+                cvarX = cvar(-X[k],var_val)
+                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.power(np.maximum(0,cvarX-cvarY[s]),2)
+                #if cvarX > cvarY[s]:
+                #    v_a = v_a  - (cvarX-cvarY[s])**2
+            elif method == ALG_UTILITY_POWER or method == ALG_UTILITY_SIGMO:
+                v_a = exp_v
             else:
                 raise 'unimplemented method'
         else:
-            v_a = df*(1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
+            v_a = (1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
         if v_a>=V_s: #Choose less risk of alternative optima
             V_s = v_a
             arg_max = a
@@ -548,16 +269,55 @@ def dp_parallel(dp_data):
 
 
 
-def cvar(x, alp):
+def cvar_plus(x, alp):
     '''
     Computes the cvar of a given vector of obsebations
     at a particular quantile value
+    Note: apl should be > 0.5 (e.g., 0.95) as this formula looks at
+          the upper tail an x_in is looked as loses
     Args:
         x(ndarray): vector with realizations
         alp (float): quantile at risk (0,1)
     '''
     var_alp=np.percentile(x, q = int(alp*100))
     return x[x>=var_alp].mean()
+
+def cvar(x_in, alp, p=None):
+    '''
+    Computes the cvar of a given vector of obsebations
+    at a particular quantile value.
+    Proposition 8 Rockafellar and  Uryasev (2002)
+    https://www.ise.ufl.edu/uryasev/files/2011/11/cvar2_jbf.pdf
+    
+    Note: apl should be > 0.5 (e.g., 0.95) as this formula looks at
+          the upper tail an x_in is looked as loses
+    Args:
+        x_in(ndarray): vector with realizations
+        alp (float): quantile at risk (0,1)
+        p (ndarray): Optional version of probabilities
+            Assumes the vector x is sorted
+    '''
+    
+    assert alp > 0, 'Value of alpha needs to be in (0,1) '
+    x = np.sort(x_in)
+    n = len(x)
+    
+    if type(p)==type(None):
+        p =  np.ones_like(x_in)/len(x_in)
+   
+    #Compute Var
+    k_alpha = int(n*alp)  + 1
+    while (not p[:k_alpha+1].sum() >= alp > p[:k_alpha].sum()) and (k_alpha>0):
+        k_alpha = k_alpha - 1
+        
+    assert p[:k_alpha+1].sum() >= alp > p[:k_alpha].sum()
+    var_alpha = x[k_alpha]
+    
+    cvar1 = (p[:k_alpha+1].sum() - alp)*var_alpha
+    cvar2 = np.sum(p[k_alpha+1:]*x[k_alpha+1:])
+    _cvar = (1/(1-alp))*(cvar1+cvar2)
+
+    return _cvar
 
 def check_SSD(X,Y):
     '''
@@ -616,10 +376,11 @@ def create_default_policy(T,w_delta,max_wealth):
             
         
             #def_pol = {(t,w_map(s)):('B' if t<=14 else ('C' if 14<t<=34 else 'D')) for t in range(T) for s in S}
-def simulation(T,U,w_map,r_sim,I0,c, replications, fix_policy=None, policy_name =""):
+def simulation(setup_params, U, w_map, r_sim, fix_policy=None, policy_name =""):
     np.random.seed(0)
-
+    T, R, rf, df, I0, c, w, G, w_delta, max_wealth = setup_params 
     I = [I0*(1+rf)**t for t in range(T)]
+    replications = len(r_sim)
     wealth_sims = []
     for k in range(replications):
         wealth_k = [0]
@@ -642,8 +403,10 @@ def simulation(T,U,w_map,r_sim,I0,c, replications, fix_policy=None, policy_name 
     above_mu = wealths[wealths>mu] - mu
     sd_m = np.sqrt(np.sum(below_mu**2)/len(wealths))
     sd_p = np.sqrt(np.sum(above_mu**2)/len(wealths))
+    exp_short = np.mean(np.maximum(0,G - wealths))#(G-np.mean(wealths[wealths <= G]))
+   
     print('%15s %10s %10s %10s %10s %10s %10s %10s %10s %10s' %('Policy', 'Mean', 'SD-', 'SD+', '70%', '80%', '90%', '95%', '100%' ,  'E.Shortfal' ))
-    print('%15s %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f %10.2f' %(policy_name, mu, sd_m, sd_p, p70, p80, p90, p95, p100, (G-np.mean(wealths[wealths <= G]))))
+    print('%15s %10.2f %10.2f %10.2f %10.3f %10.3f %10.3f %10.3f %10.3f %10.2f' %(policy_name, mu, sd_m, sd_p, p70, p80, p90, p95, p100, exp_short))
     
     return wealth_sims
 
@@ -851,14 +614,14 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
     ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0.5 )
     #fig.colorbar(im)
     ax.set_xlabel('Years')
-    ax.set_ylabel('Wealth ($USD)')
+    ax.set_ylabel('Wealth (\$USD)')
     plt.tight_layout() 
     plot_file = os.path.join(PF_path,'Plots/%s.pdf' %(plot_name) )
     #plt.savefig(plot_file, bbox_inches = 'tight', pad_inches = 1)
     pp = PdfPages(plot_file)
     pp.savefig(fig)
     pp.close()
-    #plt.show()
+    plt.show()
     
 
 # scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
@@ -977,12 +740,14 @@ def fit_returns(data):
     return marginals, dist_names
   
 
-def run_default(T,r,w_delta,max_wealth): 
-    S, A, F, w_map, steps  = setup(T,r,w_delta,max_wealth)
+def run_default(setup_params, dp_data, r, sim_returns, plot=False): 
+    T, R, rf, df, I0, c, w, G, w_delta, max_wealth = setup_params  
+    S, A, F, w_map, steps  = dp_data
     def_pol = create_default_policy(T,w_delta,max_wealth)
-    Default_sim_results = simulation(T,def_pol,w_map,simulated_returns,I0,c, replicas, policy_name="%10s" %("Default"))
+    Default_sim_results = simulation(setup_params,def_pol,w_map,sim_returns, policy_name="%10s" %("Default"))
     #plot_simulation(Default_sim_results, def_pol, style=1)
-    plot_policy_and_sim2(T ,S, w_map,  def_pol, Funds, A, G, Default_sim_results, 'Default')
+    if plot:
+        plot_policy_and_sim2(T ,S, w_map,  def_pol, Funds, A, G, Default_sim_results, 'Default')
     return def_pol, Default_sim_results
     
 if __name__ == '__main__':
@@ -998,8 +763,13 @@ if __name__ == '__main__':
     
 
     w_delta = 100
-    max_wealth = 3E6
+    max_wealth = 8E5
+   
+    case_params = T, R, rf, df, I0, c, w, G, w_delta, max_wealth
+
+    
     #returns
+    
     
     file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
     returns_cl  = pd.read_excel(file_returns, skiprows = 2)
@@ -1027,19 +797,7 @@ if __name__ == '__main__':
     NG = norta_data.gen(10000)
     monthly_returns = {f:NG[:,i] for (i,f) in enumerate(Funds)}
     r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
-    
-#    #Same shapre ratio experiment
-#    data_cov = np.cov(data, rowvar=False)
-#    SDs = np.sqrt(np.diag(data_cov))
-#    #sharpe_ratio = 0.12 + 0*np.array([0.13,0.165,0.21,0.275,0.28]) # High
-#    #sharpe_ratio = np.array([0.13,0.165,0.21,0.275,0.28]) # High
-#    #sharpe_ratio = np.array([0.12,0.14,0.17,0.21,0.22])  # Mid
-#    sharpe_ratio = np.array([0.11,0.13,0.16,0.185,0.18])  #low
-#    sr_mean_returs = (-1+(1+rf)**(1/12)) + sharpe_ratio*SDs
-#    norm_r = np.random.multivariate_normal(sr_mean_returs,data_cov,size=10000)
-#    monthly_returns = {f:norm_r[:,i] for (i,f) in enumerate(Funds)}
-#    r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
-    
+    #pickle.dump( r, open('./returns_train.p', 'wb'), pickle.HIGHEST_PROTOCOL)
     
     Funds = list(r.keys())
     Funds.sort()
@@ -1061,60 +819,17 @@ if __name__ == '__main__':
             r_index = np.random.randint(0,len(r_sim['A']))
             for (i,a) in enumerate(Funds):
                 simulated_returns[k,t,i] = r_sim[a][r_index]
- 
+    #pickle.dump(simulated_returns, open('./returns_test.p', 'wb'), pickle.HIGHEST_PROTOCOL)
     
-    default_policy, default_sim = run_default(T,r,w_delta,max_wealth) 
+    
+    default_policy, default_sim = run_default(T,r,w_delta,max_wealth,simulated_returns) 
     Y =  np.array([sr[-1] for sr in default_sim])
     sols_DP = {'Default':(default_policy, default_sim)}
-        #a = das232
-    #plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
-    
-#    V,U,S,w_map = backward_induction(T,G,df,rf,r,I0,c, steps , cvar=True)
-#    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("DP shortfall"))
-#    #plot_simulation(DP_sim_results, U, style=1)
-#    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results )
-#    
-#    plot_policies_comparizon(('Default', Default_sim_results),('DP shortfall', DP_sim_results), G)
-#    
-#    
-#    
-#    Y = simulation(T,def_pol,w_map,simulated_returns,I0,c, 1000, policy_name="%10s" %("Default-Benchmarck"))
-#    Y =  np.array([sr[-1] for sr in Y])
-#    
-#    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps , Y, sdd_tail=False)
-#    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %("SSD"))
-#    #plot_simulation(DP_sim_results, U, style=1)
-#    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
-#    
-#    plot_policies_comparizon(('Default', Default_sim_results),('SSD', DP_sim_results), G)
-#    
-#    pY = np.percentile(Y,q=5)
-#    V,U,S,w_map = backward_induction_sd(T,G,df,rf,r,I0,c, steps*4 , Y, sdd_tail=True)
-#    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('SSD-Tail'))
-#    #plot_simulation(DP_sim_results, U, style=1)
-#    plot_policy_and_sim(T ,S, w_map, U, Funds, G, DP_sim_results)
-#    plot_policies_comparizon(('Default', Default_sim_results),('CVaR-Quadratic', DP_sim_results), G)
-#   
-#    
-#    plot_policies_comparizon(('Default', Default_sim_results),('SSD-Tail', DP_sim_results), G)
+     #plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
     
     
-   
-   
- 
-#    tnow = time()
-#    V,U,S,w_map,A = backward_induction_sd_mix(T,G,df,rf,r,I0,c, steps , Y, ssd_tail=False)
-#    print(time()-tnow)
-#    tnow = time()
-#    V,U,S,w_map,A = backward_induction_sd_mix_par(T,G,rf,r,I0,c, steps , Y, method=ALG_UTILITY , ssd_tail=False)
-#    print(time()-tnow)    
-#    DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %('CVaR_Q'))
-#    #plot_simulation(DP_sim_results, U, style=1)
-#    plot_policy_and_sim2(T ,S, w_map, U, Funds, A, G, DP_sim_results)
-#    
-   
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = []#[ALG_UTILITY, ALG_CVAR_PENALTY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
+    methods_dp = [ALG_UTILITY]#[ALG_UTILITY, ALG_CVAR_PENALTY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
     
     for m in methods_dp:
         dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , method_cond=False, n_threads=4)
@@ -1126,26 +841,13 @@ if __name__ == '__main__':
     S, A, F, w_map, steps = setup_data 
     
     all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
-    out_path = os.path.join(PF_path,'all_policies_out.pickle' )
+    out_path = os.path.join(PF_path,'utility_power_gamma4_out.pickle' )
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
-    methods_dp = []
-    for m in methods_dp:
-        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , method_cond=True, n_threads=35)
-        V,U = dp_out
-        w_map = setup_data[3]
-        DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
-        sols_DP[m] = (dp_out, DP_sim_results)
-    
-    S, A, F, w_map, steps = setup_data 
-    
-    all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
-    out_path = os.path.join(PF_path,'all_policies_out_cond.pickle' )
-    pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
-    
+  
     #Read solution 
-    if False:
-        PF_path = '/Users/dduque/Dropbox/WORKSPACE/PorfolioOpt/PensionFunds/'
-        out_path = os.path.join(PF_path,'all_policies_out.pickle' )
+    if True:
+        PF_path = '/Users/dduque/MacWorkspace/PorfolioOpt/PensionFunds/'
+        out_path = os.path.join(PF_path, 'utility_power_gamma4_out.pickle')
         read_out = pickle.load(open(out_path, 'rb')) 
         S, A, F, T,r,w_delta,max_wealth ,simulated_returns, sols_DP = read_out
         methods_dp = sols_DP.keys()
@@ -1157,8 +859,9 @@ if __name__ == '__main__':
             
             if m != 'Default':
                 V,U = dp_out
-            #    simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
+                simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
                 plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, m)
+                plot_policies_comparizon(('Default', sols_DP['Default'][1]),(m, DP_sim_results), G)
         
         
         #get_investment_profiles(DP_sim_results, U, w_map,T,A, Funds)
@@ -1173,12 +876,13 @@ if __name__ == '__main__':
 
 
 if False:
-    dp_name = ALG_SSD_TAIL
+    dp_name = ALG_UTILITY
     
         
     def_wealth = np.array([sols_DP['Default'][1][k][-1] for k in range(len(sols_DP['Default'][1]))])
     uti_wealth = np.array([sols_DP[dp_name][1][k][-1] for k in range(len(sols_DP[dp_name][1]))])
     
+    check_SSD(uti_wealth, def_wealth)
     
     
     
@@ -1249,7 +953,7 @@ if False:
     ax.plot(sols_DP['Default'][1][best_def_replica] , label='Default')
     ax.legend( loc=2)
     ax.set_xlabel('Years')
-    ax.set_ylabel('Wealth ($USD)')
+    ax.set_ylabel('Wealth (\$USD)')
     plt.tight_layout()
     
     #Conditinal distributions plot
@@ -1270,6 +974,30 @@ if False:
     ax.set_xlabel('Wealth at stage T+1' ,fontsize=12)
     ax.set_ylabel('Frequency' ,fontsize=12)
     ax.legend( loc='best')
+    plt.tight_layout()
+    
+    
+    
+    
+    #VaR and CVaR plots
+    fig, ax = plt.subplots(figsize=(10, 6))
+    plt.style.use('default')
+    mu = def_wealth.mean()
+    variance = def_wealth.var()
+    sigma = np.sqrt(variance)
+    x = np.linspace(mu - 4*sigma, mu + 4*sigma, 1000)
+    ax.plot(x,mlab.normpdf(x, mu, sigma), color='blue', label='pdf')
+    rnd_nums = np.random.normal(mu,sigma,size=100000)
+    alpha_ = 0.9
+    var_a = np.percentile(rnd_nums,int(alpha_*100))
+    cvar_a = cvar(rnd_nums, alpha_)
+    ax.axvline(var_a , label='VaR', color='red')
+    ax.axvline(cvar_a , label='CVaR', color='black')
+    ax.set_xlabel('$X$' ,fontsize=12)
+    ax.set_ylabel('Frequency' ,fontsize=12)
+    ax.legend( loc='best')
+    ax.annotate(r'$1-\alpha$', xy=(2.2E5, 0.8E-6), fontsize=20)
+
     plt.tight_layout()
     
     
