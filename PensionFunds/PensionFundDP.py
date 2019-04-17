@@ -163,8 +163,9 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
         V[T,:] = utility_function(S, G, False, *method_params) 
     else:
         V[T,:] = S# utility_function(S,G) 
-
-    p  = mp.Pool(n_threads)
+    
+    print("Number of processes: ", n_threads)
+    p  = mp.Pool(processes=n_threads)
 
     for t in np.arange(T-1, -1, -1):
         I_t = I0*(1+rf)**t
