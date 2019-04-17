@@ -91,7 +91,7 @@ if __name__ == '__main__':
     '''
     method = alg_options.method
     alg_params = (alg_options.p1, alg_options.p2, alg_options.p3)
-    policy_name_params = '%10s_%.2f_%.2f_%.2f'  %(method,alg_options.p1, alg_options.p2, alg_options.p3)
+    policy_name_params = '%s_%.2f_%.2f_%.2f'  %(method,alg_options.p1, alg_options.p2, alg_options.p3)
     
     dp_out = pf.backward_induction_sd_mix_par(problem_params, dp_data, r, Y,default_policy, method=method, method_params = alg_params , method_cond=False, n_threads=alg_options.proc)
     V,U = dp_out
