@@ -126,6 +126,7 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
     r_mat = np.zeros((len(F),len(r[F[0]])))
     for (i,ai) in enumerate(F):
         r_mat[i,:]= r[ai]
+    
     act_ret = A.dot(r_mat)
     
     #R = np.eye(steps) #PMF of final wealth
@@ -185,8 +186,13 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
 def fake_parralel(x):
     max_n = int(np.log(x+10)) + 10000
     out_val = 0
+    A = np.random.normal(size=(190,5))
+    r_mat =np.random.normal(size=(5,1000))
+    re = A.dot(r_mat)
+    re2  = x*(1+re) + max_n*0.4 
+    re3 = np.sum(re2)/10000
     for i in range(max_n):
-        out_val += i
+        out_val += i + re3
     return out_val, max_n
         
         
@@ -220,8 +226,8 @@ def dp_parallel(dp_data):
     '''
     s_index = w_map(s)
     arg_max = None
-#    V_s = -np.inf
-    X = s*(1+act_ret)+c*I_t
+    V_s = -np.inf
+#    X = s*(1+act_ret)+c*I_t
 #    Xind = w_map(X)
     
 #    if t >= T-1 and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX] and type(Yq)==type(None):
