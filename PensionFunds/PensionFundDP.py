@@ -172,7 +172,7 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
         print('solving ', t, ' ' , I_t)
         #Launch parallelization for each possible state
         #par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy[T-1,0]], [r_mat], [beta_cvx])
-        #out_par = p.map(dp_parallel,par_data, chunksize=100)
+        #out_par = p.map(dp_parallel,par_data)
         out_par = p.map(fake_parralel,S)
         V[t,:] = np.array([par_res[0] for par_res in out_par])
         for (i,s) in enumerate(S):
@@ -218,64 +218,65 @@ def dp_parallel(dp_data):
     ================================
     Solve DP for state s and time t
     '''
-    s_index = w_map(s)
-    arg_max = None
-    V_s = -np.inf
-    X = s*(1+act_ret)+c*I_t
-    Xind = w_map(X)
-    
-    if t >= T-1 and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX] and type(Yq)==type(None):
-        newY =  s*(1+Y_policy.dot(r_mat))+c*I_t
-        Yq = np.percentile(newY,q=[i for i in range(0,101)],axis=0)
-        Ytail = Yq[Yq<=G]
-        YY = np.tile(Yq, (len(Yq), 1))
-        SSD =  np.maximum(Yq - YY.transpose(), 0)
-        SDD_constant = SSD.mean(0)
-        print('Tamano SSD Y ' , len(SDD_constant))
-    
-    for (k,a) in enumerate(Actions):
-        v_a = None
-        s_a_i = Xind[k]
-        if t >= T-1:
-            exp_v = (1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
-            if method == ALG_SSD:
-                XX = np.tile(X[k], (len(Yq), 1))
-                SSD =  np.maximum(Yq - XX.transpose(), 0)
-                SDD_mean = SSD.mean(0)
-                SSD_violations =  np.maximum(0, SDD_mean - SDD_constant)
-                v_a = beta_cvx * exp_v - (1-beta_cvx) * SSD_violations.sum()
-            elif method == ALG_SSD_TAIL:
-                assert len(Ytail)==len(SDD_constant), 'SSD constant vector has a different dimension'
-                XX = np.tile(X[k], (len(Ytail), 1))
-                SSD =  np.maximum(Ytail - XX.transpose(), 0)
-                SDD_mean = SSD.mean(0)
-                SSD_violations =  np.maximum(0, SDD_mean - SDD_constant)
-                v_a = beta_cvx * exp_v - (1-beta_cvx) * SSD_violations.sum()
-            elif method == ALG_SSD_MINMAX:
-                XX = np.tile(X[k], (len(Yq), 1))
-                SSD =  np.maximum(Yq - XX.transpose(), 0)
-                SDD_mean = SSD.mean(0)
-                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.max(SDD_mean - SDD_constant)
-            elif method == ALG_CVAR_PENALTY_LIN:
-                cvarX = cvar(-X[k],var_val)
-                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.maximum(0,cvarX-cvarY[s])
-                #if cvarX > cvarY[s]:
-                #    v_a = v_a  - 100*(cvarX-cvarY[s])
-            elif method == ALG_CVAR_PENALTY_QUA:
-                cvarX = cvar(-X[k],var_val)
-                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.power(np.maximum(0,cvarX-cvarY[s]),2)
-                #if cvarX > cvarY[s]:
-                #    v_a = v_a  - (cvarX-cvarY[s])**2
-            elif method == ALG_UTILITY_POWER or method == ALG_UTILITY_SIGMO:
-                v_a = exp_v
-            else:
-                raise 'unimplemented method'
-        else:
-            v_a = (1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
-        if v_a>=V_s: #Choose less risk of alternative optima
-            V_s = v_a
-            arg_max = a
-    return V_s, arg_max 
+#    s_index = w_map(s)
+#    arg_max = None
+#    V_s = -np.inf
+#    X = s*(1+act_ret)+c*I_t
+#    Xind = w_map(X)
+#    
+#    if t >= T-1 and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX] and type(Yq)==type(None):
+#        newY =  s*(1+Y_policy.dot(r_mat))+c*I_t
+#        Yq = np.percentile(newY,q=[i for i in range(0,101)],axis=0)
+#        Ytail = Yq[Yq<=G]
+#        YY = np.tile(Yq, (len(Yq), 1))
+#        SSD =  np.maximum(Yq - YY.transpose(), 0)
+#        SDD_constant = SSD.mean(0)
+#        print('Tamano SSD Y ' , len(SDD_constant))
+#    
+#    for (k,a) in enumerate(Actions):
+#        v_a = None
+#        s_a_i = Xind[k]
+#        if t >= T-1:
+#            exp_v = (1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
+#            if method == ALG_SSD:
+#                XX = np.tile(X[k], (len(Yq), 1))
+#                SSD =  np.maximum(Yq - XX.transpose(), 0)
+#                SDD_mean = SSD.mean(0)
+#                SSD_violations =  np.maximum(0, SDD_mean - SDD_constant)
+#                v_a = beta_cvx * exp_v - (1-beta_cvx) * SSD_violations.sum()
+#            elif method == ALG_SSD_TAIL:
+#                assert len(Ytail)==len(SDD_constant), 'SSD constant vector has a different dimension'
+#                XX = np.tile(X[k], (len(Ytail), 1))
+#                SSD =  np.maximum(Ytail - XX.transpose(), 0)
+#                SDD_mean = SSD.mean(0)
+#                SSD_violations =  np.maximum(0, SDD_mean - SDD_constant)
+#                v_a = beta_cvx * exp_v - (1-beta_cvx) * SSD_violations.sum()
+#            elif method == ALG_SSD_MINMAX:
+#                XX = np.tile(X[k], (len(Yq), 1))
+#                SSD =  np.maximum(Yq - XX.transpose(), 0)
+#                SDD_mean = SSD.mean(0)
+#                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.max(SDD_mean - SDD_constant)
+#            elif method == ALG_CVAR_PENALTY_LIN:
+#                cvarX = cvar(-X[k],var_val)
+#                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.maximum(0,cvarX-cvarY[s])
+#                #if cvarX > cvarY[s]:
+#                #    v_a = v_a  - 100*(cvarX-cvarY[s])
+#            elif method == ALG_CVAR_PENALTY_QUA:
+#                cvarX = cvar(-X[k],var_val)
+#                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.power(np.maximum(0,cvarX-cvarY[s]),2)
+#                #if cvarX > cvarY[s]:
+#                #    v_a = v_a  - (cvarX-cvarY[s])**2
+#            elif method == ALG_UTILITY_POWER or method == ALG_UTILITY_SIGMO:
+#                v_a = exp_v
+#            else:
+#                raise 'unimplemented method'
+#        else:
+#            v_a = (1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
+#        if v_a>=V_s: #Choose less risk of alternative optima
+#            V_s = v_a
+#            arg_max = a
+#    return V_s, arg_max 
+    return fake_parralel(s)
 
 
 
