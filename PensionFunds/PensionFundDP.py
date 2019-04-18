@@ -171,9 +171,9 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
         I_t = I0*(1+rf)**t
         print('solving ', t, ' ' , I_t)
         #Launch parallelization for each possible state
-        #par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy[T-1,0]], [r_mat], [beta_cvx])
-        #out_par = p.map(dp_parallel,par_data)
-        out_par = p.map(fake_parralel,S)
+        par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy[T-1,0]], [r_mat], [beta_cvx])
+        out_par = p.map(dp_parallel,par_data)
+        #out_par = p.map(fake_parralel,S)
         V[t,:] = np.array([par_res[0] for par_res in out_par])
         for (i,s) in enumerate(S):
             U[t,i] = out_par[i][1]
