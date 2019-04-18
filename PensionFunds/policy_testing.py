@@ -70,7 +70,7 @@ if __name__ == '__main__':
     r = pickle.load(open(return_train_file, 'rb'))
     return_test_file = os.path.join(PF_path, 'returns_test.p' )
     simulated_returns = pickle.load(open(return_test_file, 'rb'))
-    replicas = len(simulated_returns)
+
     
     '''
     Wrap problem parameters and dp data

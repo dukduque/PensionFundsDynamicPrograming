@@ -770,57 +770,59 @@ if __name__ == '__main__':
 
     
     #returns
+#    file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
+#    returns_cl  = pd.read_excel(file_returns, skiprows = 2)
+#    returns_cl =  returns_cl.dropna() 
+#    
+#    Funds = ['A','B','C','D','E']
+#    monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds}
+#    data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds]).transpose()
+#    
+##    if False: #Show correlogram
+##        data_df = pd.DataFrame(data=data, columns=Funds)
+##        for f in data_df.columns:
+##            plot_pacf(data_df[f], lags=24)
+##    invs_marginals, marg_names= fit_returns(data)
+#    
+#    #norta_data = fit_NORTA(data,len(data),len(data[0]), F_invs=invs_marginals)
+#    #pickle.dump( norta_data.C, open('./norta_obj.pickle', 'wb'), pickle.HIGHEST_PROTOCOL)
+#    norta_file = os.path.join(PF_path,'norta_obj.pickle' )
+#    norta_c_matrix = pickle.load(open(norta_file, 'rb'))
+#    F_invs = [build_empirical_inverse_cdf(np.sort(data[:,i])) for i in range(len(Funds))]
+#    #F_invs = invs_marginals
+#    norta_data = NORTA(F_invs ,norta_c_matrix )
+#    NG = norta_data.gen(10000)
+#    monthly_returns = {f:NG[:,i] for (i,f) in enumerate(Funds)}
+#    r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
+#    #pickle.dump( r, open('./returns_train.p', 'wb'), pickle.HIGHEST_PROTOCOL)
+#    
+#    Funds = list(r.keys())
+#    Funds.sort()
+#    print([np.mean(r[a]) for a in Funds])
+#    print([np.std(r[a]) for a in Funds])
+#    print([(np.mean(r[a])-rf)/np.std(r[a]) for a in Funds])
+#    #plt.scatter([np.std(r[a]) for a in Funds] , [np.mean(r[a]) for a in Funds] )
+#    
+#   
+#    
+#    np.random.seed(0)
+#    replicas = 10000
+#    simulated_returns = np.zeros((replicas,T,len(Funds)))
+#    NG_sim =norta_data.gen(20000) # np.random.multivariate_normal(sr_mean_returs,data_cov,size=10000)#
+#    monthly_returns_sim = {f:NG_sim[:,i] for (i,f) in enumerate(Funds)}
+#    r_sim = gen_yearly_returns(Funds, monthly_returns_sim,  n_years=15000)
+#    for k in range(replicas):
+#        for t in range(T):
+#            r_index = np.random.randint(0,len(r_sim['A']))
+#            for (i,a) in enumerate(Funds):
+#                simulated_returns[k,t,i] = r_sim[a][r_index]
+#    #pickle.dump(simulated_returns, open('./returns_test.p', 'wb'), pickle.HIGHEST_PROTOCOL)
     
+    return_train_file = os.path.join(PF_path, 'returns_train.p' )
+    r = pickle.load(open(return_train_file, 'rb'))
+    return_test_file = os.path.join(PF_path, 'returns_test.p' )
+    simulated_returns = pickle.load(open(return_test_file, 'rb'))
     
-    file_returns = '/Users/dduque/Dropbox/Northwestern/Research/Pension Funds DP/rentabilidad_real_mensual_fondos_deflactada_uf.xls'
-    returns_cl  = pd.read_excel(file_returns, skiprows = 2)
-    returns_cl =  returns_cl.dropna() 
-    
-    Funds = ['A','B','C','D','E']
-    monthly_returns = {f:np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds}
-    data = np.array([np.array(returns_cl['Fondo Tipo %s' %f]/100) for f in Funds]).transpose()
-   
-    
-    
-#    if False: #Show correlogram
-#        data_df = pd.DataFrame(data=data, columns=Funds)
-#        for f in data_df.columns:
-#            plot_pacf(data_df[f], lags=24)
-#    invs_marginals, marg_names= fit_returns(data)
-    
-    #norta_data = fit_NORTA(data,len(data),len(data[0]), F_invs=invs_marginals)
-    #pickle.dump( norta_data.C, open('./norta_obj.pickle', 'wb'), pickle.HIGHEST_PROTOCOL)
-    norta_file = os.path.join(PF_path,'norta_obj.pickle' )
-    norta_c_matrix = pickle.load(open(norta_file, 'rb'))
-    F_invs = [build_empirical_inverse_cdf(np.sort(data[:,i])) for i in range(len(Funds))]
-    #F_invs = invs_marginals
-    norta_data = NORTA(F_invs ,norta_c_matrix )
-    NG = norta_data.gen(10000)
-    monthly_returns = {f:NG[:,i] for (i,f) in enumerate(Funds)}
-    r = gen_yearly_returns(Funds, monthly_returns,  n_years=1000)
-    #pickle.dump( r, open('./returns_train.p', 'wb'), pickle.HIGHEST_PROTOCOL)
-    
-    Funds = list(r.keys())
-    Funds.sort()
-    print([np.mean(r[a]) for a in Funds])
-    print([np.std(r[a]) for a in Funds])
-    print([(np.mean(r[a])-rf)/np.std(r[a]) for a in Funds])
-    #plt.scatter([np.std(r[a]) for a in Funds] , [np.mean(r[a]) for a in Funds] )
-    
-   
-    
-    np.random.seed(0)
-    replicas = 10000
-    simulated_returns = np.zeros((replicas,T,len(Funds)))
-    NG_sim =norta_data.gen(20000) # np.random.multivariate_normal(sr_mean_returs,data_cov,size=10000)#
-    monthly_returns_sim = {f:NG_sim[:,i] for (i,f) in enumerate(Funds)}
-    r_sim = gen_yearly_returns(Funds, monthly_returns_sim,  n_years=15000)
-    for k in range(replicas):
-        for t in range(T):
-            r_index = np.random.randint(0,len(r_sim['A']))
-            for (i,a) in enumerate(Funds):
-                simulated_returns[k,t,i] = r_sim[a][r_index]
-    #pickle.dump(simulated_returns, open('./returns_test.p', 'wb'), pickle.HIGHEST_PROTOCOL)
     
     problem_params = T, R, rf, df, I0, c, w, G, w_delta, max_wealth
     dp_data = setup(T,r,w_delta,max_wealth)
