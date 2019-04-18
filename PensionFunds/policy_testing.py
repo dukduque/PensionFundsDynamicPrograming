@@ -109,11 +109,22 @@ if __name__ == '__main__':
     #pf.plot_policies_comparizon(('Default', sols_DP['Default'][1]),(method, DP_sim_results), G)
     
     
+
+if False:
+    import multiprocessing as mp
+    from  time import time
+    import numpy as np
+    mp.set_start_method('spawn')
     
+    def ff(x):
+        return np.log(np.power(x+1,2))
     
-    
-    
-    
+    p  = mp.Pool(4)
+    tnow=time()
+    p.map(ff, range(10))
+    total_time = time()-tnow
+    print(total_time)
+    p.terminate()
     
     
     

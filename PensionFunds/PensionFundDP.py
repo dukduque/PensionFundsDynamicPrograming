@@ -172,7 +172,7 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
         print('solving ', t, ' ' , I_t)
         #Launch parallelization for each possible state
         par_data = product(S, [(w_delta, max_wealth,steps)],[act_ret],[c],[I_t],[method],[Ytail], [Yq], [t],[T],[V[t+1,:]],[A],[SDD_constant],[cvarY],[var_val], [Y_policy[T-1,0]], [r_mat], [beta_cvx])
-        out_par = p.map(dp_parallel,par_data)
+        out_par = p.map(dp_parallel,par_data, chunksize=100)
         V[t,:] = np.array([par_res[0] for par_res in out_par])
         for (i,s) in enumerate(S):
             U[t,i] = out_par[i][1]
@@ -822,18 +822,24 @@ if __name__ == '__main__':
                 simulated_returns[k,t,i] = r_sim[a][r_index]
     #pickle.dump(simulated_returns, open('./returns_test.p', 'wb'), pickle.HIGHEST_PROTOCOL)
     
+    problem_params = T, R, rf, df, I0, c, w, G, w_delta, max_wealth
+    dp_data = setup(T,r,w_delta,max_wealth)
     
-    default_policy, default_sim = run_default(T,r,w_delta,max_wealth,simulated_returns) 
+    default_policy, default_sim = run_default(problem_params, dp_data, r,simulated_returns,plot=False) 
     Y =  np.array([sr[-1] for sr in default_sim])
     sols_DP = {'Default':(default_policy, default_sim)}
      #plot_policies_comparizon(('Default', Default_sim_results),('DP utility', DP_sim_results), G)
     
     
     setup_data = setup(T,r,w_delta,max_wealth)
-    methods_dp = [ALG_UTILITY]#[ALG_UTILITY, ALG_CVAR_PENALTY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
+    methods_dp = [ALG_UTILITY_POWER]#[ALG_UTILITY, ALG_CVAR_PENALTY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
+    
+    alg_params = (6, 0, 0)
+    policy_name_params = '%s_%.2f_%.2f_%.2f'  %(alg_params[0], alg_params[1], alg_params[2])
+      
     
     for m in methods_dp:
-        dp_out = backward_induction_sd_mix_par(T,setup_data,G,rf,r,I0,c, Y,default_policy, w_delta=w_delta, method=m , method_cond=False, n_threads=4)
+        dp_out = backward_induction_sd_mix_par(problem_params, dp_data, r, Y,default_policy, method=m, method_params = alg_params , method_cond=False, n_threads=3)
         V,U = dp_out
         w_map = setup_data[3]
         DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
@@ -842,11 +848,11 @@ if __name__ == '__main__':
     S, A, F, w_map, steps = setup_data 
     
     all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
-    out_path = os.path.join(PF_path,'utility_power_gamma4_out.pickle' )
+    out_path = os.path.join(PF_path,'%s.pickle' %(policy_name_params))
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
   
     #Read solution 
-    if True:
+    if False:
         PF_path = '/Users/dduque/MacWorkspace/PorfolioOpt/PensionFunds/'
         out_path = os.path.join(PF_path, 'utility_power_gamma4_out.pickle')
         read_out = pickle.load(open(out_path, 'rb')) 
