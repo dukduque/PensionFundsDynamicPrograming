@@ -219,9 +219,9 @@ def dp_parallel(dp_data):
     Solve DP for state s and time t
     '''
     s_index = w_map(s)
-#    arg_max = None
+    arg_max = None
 #    V_s = -np.inf
-#    X = s*(1+act_ret)+c*I_t
+    X = s*(1+act_ret)+c*I_t
 #    Xind = w_map(X)
     
 #    if t >= T-1 and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX] and type(Yq)==type(None):
