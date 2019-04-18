@@ -54,8 +54,8 @@ if __name__ == '__main__':
     w = 2/3
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
     
-    w_delta = 100
-    max_wealth = 3E6
+    w_delta = 300#100
+    max_wealth = 7E5#3E6
     
 
     '''
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     '''
     method = alg_options.method
     alg_params = (alg_options.p1, alg_options.p2, alg_options.p3)
-    policy_name_params = '%s_%.2f_%.2f_%.2f'  %(method,alg_options.p1, alg_options.p2, alg_options.p3)
+    policy_name_params = '%s_%.4f_%.3f_%.2f'  %(method,alg_options.p1, alg_options.p2, alg_options.p3)
     
     dp_out = pf.backward_induction_sd_mix_par(problem_params, dp_data, r, Y,default_policy, method=method, method_params = alg_params , method_cond=False, n_threads=alg_options.proc)
     V,U = dp_out
@@ -105,7 +105,7 @@ if __name__ == '__main__':
     out_path = os.path.join(PF_path,'%s.pickle' %(policy_name_params))
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
   
-    #pf.plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, method)
+    pf.plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, method)
     #pf.plot_policies_comparizon(('Default', sols_DP['Default'][1]),(method, DP_sim_results), G)
     
     
