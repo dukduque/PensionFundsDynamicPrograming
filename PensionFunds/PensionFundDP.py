@@ -219,20 +219,20 @@ def dp_parallel(dp_data):
     Solve DP for state s and time t
     '''
     s_index = w_map(s)
-    arg_max = None
-    V_s = -np.inf
-    X = s*(1+act_ret)+c*I_t
-    Xind = w_map(X)
+#    arg_max = None
+#    V_s = -np.inf
+#    X = s*(1+act_ret)+c*I_t
+#    Xind = w_map(X)
     
-    if t >= T-1 and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX] and type(Yq)==type(None):
-        newY =  s*(1+Y_policy.dot(r_mat))+c*I_t
-        Yq = np.percentile(newY,q=[i for i in range(0,101)],axis=0)
-        Ytail = Yq[Yq<=G]
-        YY = np.tile(Yq, (len(Yq), 1))
-        SSD =  np.maximum(Yq - YY.transpose(), 0)
-        SDD_constant = SSD.mean(0)
-        print('Tamano SSD Y ' , len(SDD_constant))
-   
+#    if t >= T-1 and method in [ALG_SSD,ALG_SSD_TAIL, ALG_SSD_MINMAX] and type(Yq)==type(None):
+#        newY =  s*(1+Y_policy.dot(r_mat))+c*I_t
+#        Yq = np.percentile(newY,q=[i for i in range(0,101)],axis=0)
+#        Ytail = Yq[Yq<=G]
+#        YY = np.tile(Yq, (len(Yq), 1))
+#        SSD =  np.maximum(Yq - YY.transpose(), 0)
+#        SDD_constant = SSD.mean(0)
+#        print('Tamano SSD Y ' , len(SDD_constant))
+#   
 #    for (k,a) in enumerate(Actions):
 #        v_a = None
 #        s_a_i = Xind[k]
