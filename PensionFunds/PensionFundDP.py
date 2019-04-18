@@ -186,13 +186,13 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
 def fake_parralel(x):
     max_n = int(np.log(x+10)) + 10000
     out_val = 0
-    A = np.random.normal(size=(190,5))
-    r_mat =np.random.normal(size=(5,1000))
-    re = A.dot(r_mat)
+    #A = np.random.normal(size=(190,5))
+    #r_mat =np.random.normal(size=(5,1000))
+    #re = A.dot(r_mat)
     #re2  = x*(1+re) + max_n*0.4 
-    re3 = 10#np.sum(re2)/10000
+    #re3 = 10#np.sum(re2)/10000
     for i in range(max_n):
-        out_val += i + re3
+        out_val += i
     return out_val, max_n
         
         
