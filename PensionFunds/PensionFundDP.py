@@ -835,7 +835,7 @@ if __name__ == '__main__':
     methods_dp = [ALG_UTILITY_POWER]#[ALG_UTILITY, ALG_CVAR_PENALTY, ALG_SSD, ALG_SSD_TAIL,ALG_SSD_MINMAX]  
     
     alg_params = (6, 0, 0)
-    policy_name_params = '%s_%.2f_%.2f_%.2f'  %(alg_params[0], alg_params[1], alg_params[2])
+    policy_name_params = '%s_%.2f_%.2f_%.2f'  %(methods_dp[0],alg_params[0], alg_params[1], alg_params[2])
       
     
     for m in methods_dp:
