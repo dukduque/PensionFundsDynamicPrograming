@@ -164,21 +164,21 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
                     cvarY[s], _ = cvar(-newY,var_val)  
                 else:
                     cvarY[s]= cvarY_unconditioned
-     
-        #cvarY = cvar(-Y,var_val) 
-        if method_cond == False:
-            y_trunc = G*var_val
-            Y_beta = Y[Y<y_trunc]
-            Yq = np.percentile(Y_beta,q=[i for i in range(0,101)],axis=0) 
-            YY = np.tile(Y, (len(Yq), 1))
-            SSD =  np.maximum(Yq - YY.transpose(), 0 )
-            SDD_constant = SSD.mean(0)
-            Ytail = Yq[Yq<=y_trunc]
-            #YY = np.tile(Yq, (len(Yq), 1))
-            #SSD =  np.maximum(Yq - YY.transpose(), 0 )
-            #SDD_constant = SSD.mean(0)
-            #if method in [ALG_SSD_TAIL, ALG_SSD_TAIL_R, ALG_SSD_MINMAX]:
-            #    SDD_constant = SDD_constant[Yq<=y_trunc]
+        else:
+            #cvarY = cvar(-Y,var_val) 
+            if method_cond == False:
+                y_trunc = G*var_val
+                Y_beta = Y[Y<y_trunc]
+                Yq = np.percentile(Y_beta,q=[i for i in range(0,101)],axis=0) 
+                YY = np.tile(Y, (len(Yq), 1))
+                SSD =  np.maximum(Yq - YY.transpose(), 0 )
+                SDD_constant = SSD.mean(0)
+                Ytail = Yq[Yq<=y_trunc]
+                #YY = np.tile(Yq, (len(Yq), 1))
+                #SSD =  np.maximum(Yq - YY.transpose(), 0 )
+                #SDD_constant = SSD.mean(0)
+                #if method in [ALG_SSD_TAIL, ALG_SSD_TAIL_R, ALG_SSD_MINMAX]:
+                #    SDD_constant = SDD_constant[Yq<=y_trunc]
     
     print('Method parameters: ' , method_params)
 
