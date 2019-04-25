@@ -55,14 +55,9 @@ if __name__ == '__main__':
     G = np.round(w*I_star*sum(df**k for k in range(1,R+1)))
     
     w_delta = 100
-    max_wealth = 4E6
+    max_wealth = 3E6
     
-
-    '''
-    Output variables to store
-    '''
-    sols_DP = {}
-    
+ 
     '''
     Read returns data
     '''
@@ -77,13 +72,17 @@ if __name__ == '__main__':
     '''
     problem_params = T, R, rf, df, I0, c, w, G, w_delta, max_wealth
     dp_data = pf.setup(T,r,w_delta,max_wealth)
+    S, A, F, w_map, steps = dp_data
     
     '''
-    Build and simulate default policy
+    Build, simulate, and store default policy
     '''
     default_policy, default_sim = pf.run_default(problem_params, dp_data, r,simulated_returns,plot=False) 
     Y =  np.array([sr[-1] for sr in default_sim]) #Benchmark random variable
-    sols_DP['Default'] = (default_policy, default_sim)
+    sols_DP = {'Default':(default_policy, default_sim)}
+    policy_output  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
+    out_path = os.path.join(PF_path,'%s.pickle' %('Default'))
+    pickle.dump(policy_output , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
     
     
     '''
@@ -96,35 +95,17 @@ if __name__ == '__main__':
     dp_out = pf.backward_induction_sd_mix_par(problem_params, dp_data, r, Y,default_policy, method=method, method_params = alg_params , method_cond=False, n_threads=alg_options.proc)
     V,U = dp_out
     w_map = dp_data[3]
-    DP_sim_results = pf.simulation(problem_params,U,w_map,simulated_returns, policy_name=policy_name_params)
-    sols_DP[method] = (dp_out, DP_sim_results)
+    DP_sim_results, out_stats = pf.simulation(problem_params,U,w_map,simulated_returns, policy_name=policy_name_params)
+    sols_DP = {method:(dp_out, DP_sim_results)}
     
     
-    S, A, F, w_map, steps = dp_data
+    
     all_policies_out  = (S, A, F, T,r,w_delta,max_wealth,simulated_returns, sols_DP)
     out_path = os.path.join(PF_path,'%s.pickle' %(policy_name_params))
     pickle.dump(all_policies_out , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
+    out_path = os.path.join(PF_path,'%s_stats.pickle' %(policy_name_params))
+    pickle.dump(out_stats , open(out_path, 'wb'), pickle.HIGHEST_PROTOCOL)
   
-    pf.plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, method)
+    #pf.plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, method)
     #pf.plot_policies_comparizon(('Default', sols_DP['Default'][1]),(method, DP_sim_results), G)
-    
-    
-
-if False:
-    import multiprocessing as mp
-    from  time import time
-    import numpy as np
-    mp.set_start_method('spawn')
-    
-    def ff(x):
-        return np.log(np.power(x+1,2))
-    
-    p  = mp.Pool(4)
-    tnow=time()
-    p.map(ff, range(10))
-    total_time = time()-tnow
-    print(total_time)
-    p.terminate()
-    
-    
     

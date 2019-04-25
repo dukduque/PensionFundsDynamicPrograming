@@ -27,11 +27,15 @@ from matplotlib import colors
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.mlab as mlab
 from matplotlib import rc
+rc('text', usetex=True)
+rc('font', size=14)
+rc('legend', fontsize=13)
+rc('text.latex', preamble=r'\usepackage{cmbright}')
 #Set up font for latex
-rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
+#rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
 ## for Palatino and other serif fonts use:
 #rc('font',**{'family':'serif','serif':['Palatino']})
-rc('text', usetex=True)
+#rc('text', usetex=True)
 import scipy.stats
 import scipy.stats as st
 import pandas as pd
@@ -102,8 +106,10 @@ def setup(T, r, w_delta=100, max_wealth=2E6):
     r_mat = np.zeros((len(F),len(r[F[0]])))
     for (i,ai) in enumerate(F):
         r_mat[i,:]= r[ai]
+    r_mean= np.mean(r_mat,axis=1)
     r_cov = np.cov(r_mat)   
-    A.sort(key = lambda x:x.dot(r_cov.dot(x)), reverse=True)             
+    #A.sort(key = lambda x:x.dot(r_cov.dot(x)), reverse=True)             
+    A.sort(key = lambda x:r_mean.dot(x), reverse=True)             
                     
     A = np.array(A)
     w_map = w_index(w_delta, max_wealth,steps)
@@ -151,24 +157,28 @@ def backward_induction_sd_mix_par(problem_data, dp_data, r , Y=None, Y_policy=No
         if  method in [ALG_CVAR_PENALTY_LIN, ALG_CVAR_PENALTY_QUA]:
             assert 0<=beta_cvx<=1, "Invalid beta value"
             assert 0<var_val<1, "Invalid alpha value"
-            cvarY_unconditioned = cvar(-Y,var_val)  
+            cvarY_unconditioned, VaR_Y_unconditioned = cvar(-Y,var_val)  
             for (i,s) in enumerate(S):
                 if method_cond:
                     newY =  s*(1+Y_policy[T-1,i].dot(r_mat))+c*(I0*(1+rf)**(T-1))
-                    cvarY[s] = cvar(-newY,var_val)  
+                    cvarY[s], _ = cvar(-newY,var_val)  
                 else:
-                    cvarY[s] = cvarY_unconditioned
+                    cvarY[s]= cvarY_unconditioned
      
         #cvarY = cvar(-Y,var_val) 
         if method_cond == False:
-            Yq = np.percentile(Y,q=[i for i in range(0,101)],axis=0)
-            G_tail = G*var_val
-            Ytail= Yq[Yq<=G_tail]
-            YY = np.tile(Yq, (len(Yq), 1))
+            y_trunc = G*var_val
+            Y_beta = Y[Y<y_trunc]
+            Yq = np.percentile(Y_beta,q=[i for i in range(0,101)],axis=0) 
+            YY = np.tile(Y, (len(Yq), 1))
             SSD =  np.maximum(Yq - YY.transpose(), 0 )
             SDD_constant = SSD.mean(0)
-            if method in [ALG_SSD_TAIL, ALG_SSD_TAIL_R] :
-                SDD_constant = SDD_constant[Yq<=G_tail]
+            Ytail = Yq[Yq<=y_trunc]
+            #YY = np.tile(Yq, (len(Yq), 1))
+            #SSD =  np.maximum(Yq - YY.transpose(), 0 )
+            #SDD_constant = SSD.mean(0)
+            #if method in [ALG_SSD_TAIL, ALG_SSD_TAIL_R, ALG_SSD_MINMAX]:
+            #    SDD_constant = SDD_constant[Yq<=y_trunc]
     
     print('Method parameters: ' , method_params)
 
@@ -281,24 +291,20 @@ def dp_parallel(dp_data):
                 assert len(Ytail)==len(SDD_constant), 'SSD constant vector has a different dimension'
                 XX = np.tile(X[k], (len(Ytail), 1))
                 SSD =  np.maximum(Ytail - XX.transpose(), 0)
-                SDD_mean = SSD.mean(0)
-                v_a = beta_cvx * exp_v - (1-beta_cvx) * SDD_mean.sum()
+                SDD_slacks = SSD.mean(0) - SDD_constant
+                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.sum(SDD_slacks)
             elif method == ALG_SSD_MINMAX:
+                assert len(Yq)==len(SDD_constant), 'SSD constant vector has a different dimension'
                 XX = np.tile(X[k], (len(Yq), 1))
                 SSD =  np.maximum(Yq - XX.transpose(), 0)
-                SDD_mean = SSD.mean(0)
-                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.max(SDD_mean - SDD_constant)
+                SDD_slacks = SSD.mean(0) - SDD_constant
+                v_a = beta_cvx * exp_v - (1-beta_cvx) * np.max(SDD_slacks)
             elif method == ALG_CVAR_PENALTY_LIN:
-                cvarX = cvar(-X[k],var_val)
+                cvarX, VaR_X = cvar(-X[k],var_val)
                 v_a = beta_cvx * exp_v - (1-beta_cvx) * np.maximum(0,cvarX-cvarY[s])
-                #v_a = df*exp_v
-                #if cvarX > cvarY[s]:
-                #    v_a = v_a  - 100*(cvarX-cvarY[s])
             elif method == ALG_CVAR_PENALTY_QUA:
-                cvarX = cvar(-X[k],var_val)
+                cvarX, VaR_X = cvar(-X[k],var_val)
                 v_a = beta_cvx * exp_v - (1-beta_cvx) * np.power(np.maximum(0,cvarX-cvarY[s]),2)
-                #if cvarX > cvarY[s]:
-                #    v_a = v_a  - (cvarX-cvarY[s])**2
             elif method == ALG_UTILITY_POWER or method == ALG_UTILITY_SIGMO:
                 v_a = exp_v
             else:
@@ -306,7 +312,7 @@ def dp_parallel(dp_data):
         else:
             v_a = (1/len(s_a_i))*np.sum(Vt1[s_a_i]) #Expectation
         
-        if v_a >= V_s: #Choose less risk of alternative optima
+        if v_a > V_s: #Choose more exp return alternative optima
             V_s = v_a
             arg_max = a
     return V_s, arg_max 
@@ -335,7 +341,7 @@ def cvar(x_in, alp, p=None):
     https://www.ise.ufl.edu/uryasev/files/2011/11/cvar2_jbf.pdf
     
     Note: apl should be > 0.5 (e.g., 0.95) as this formula looks at
-          the upper tail an x_in is looked as loses
+          the upper tail of x_in and Var is computed as p(x<=VaR)=alp
     Args:
         x_in(ndarray): vector with realizations
         alp (float): quantile at risk (0,1)
@@ -362,7 +368,7 @@ def cvar(x_in, alp, p=None):
     cvar2 = np.sum(p[k_alpha+1:]*x[k_alpha+1:])
     _cvar = (1/(1-alp))*(cvar1+cvar2)
 
-    return _cvar
+    return _cvar, var_alpha
 
 def check_SSD(X,Y):
     '''
@@ -452,8 +458,8 @@ def simulation(setup_params, U, w_map, r_sim, fix_policy=None, policy_name =""):
    
     print('%15s %10s %10s %10s %10s %10s %10s %10s %10s %10s' %('Policy', 'Mean', 'SD-', 'SD+', '70%', '80%', '90%', '95%', '100%' ,  'E.Shortfal' ))
     print('%15s %10.2f %10.2f %10.2f %10.3f %10.3f %10.3f %10.3f %10.3f %10.2f' %(policy_name, mu, sd_m, sd_p, p70, p80, p90, p95, p100, exp_short))
-    
-    return wealth_sims
+    out_stats = policy_name, mu, sd_m, sd_p, p70, p80, p90, p95, p100, exp_short
+    return wealth_sims, out_stats
 
 def gen_yearly_returns(Funds, monthly_returns, n_years):
     '''
@@ -513,13 +519,13 @@ def plot_simulation(sim_results, policy, style):
         plt.tight_layout()
         plt.show()
 
-def plot_policies_comparizon(p1_results, p2_results,G):
+def plot_policies_comparizon(p1_results, p2_results,G, plot_name, display_plot=False, ):
     wealths = [sr[-1] for sr in p1_results[1]]
     wealths.sort()
     bins = 300
     heights,bins = np.histogram(wealths,bins=bins)
     n_pdf = 10000
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(7, 4), dpi=100)
     hist_dist1 = scipy.stats.rv_histogram((heights,bins))
     X = np.linspace(wealths[0], wealths[-1], n_pdf)
     max_p1 = np.max(hist_dist1.pdf(X))
@@ -539,22 +545,30 @@ def plot_policies_comparizon(p1_results, p2_results,G):
         X = np.linspace(wealths[0], wealths[-1], n_pdf)
         max_p2 = np.max(hist_dist2.pdf(X))
         ax.fill_between(X,hist_dist2.pdf(X),np.zeros_like(X), alpha=0.5, color='red')
-        axR.plot(X, hist_dist2.cdf(X), label=p2_results[0], color='red')
+        label_name = p2_results[0]
+        label_name = label_name.replace('_', ' ')
+        axR.plot(X, hist_dist2.cdf(X), label=r'%s' %(label_name), color='red')
     
     
     ax.set_yticks(np.linspace(0, np.maximum(max_p1,max_p2), 11))
     ax.set_ylim(0,np.maximum(max_p1,max_p2))
-    ax.set_xlabel('Wealth at T')
+    ax.set_xlabel('Wealth at T+1')
     ax.set_ylabel('Frequency')
-    ax.set_yticklabels(['%6.2e' %(num) for num in np.linspace(0, np.maximum(max_p1,max_p2), 11)])
-    ax.grid('on')
+    ax.set_yticklabels([r'%6.2e' %(num) for num in np.linspace(0, np.maximum(max_p1,max_p2), 11)])
+    ax.grid(True, which='major', axis='both')
     axR.set_yticks(np.linspace(0, 1, 11))
     axR.set_ylim(0,1)
     axR.set_ylabel('Cumulative')
     axR.axvline(G , label='G', color='black')
     axR.legend(loc='best', shadow=True, fontsize='small')
     plt.tight_layout()
-    plt.show()
+    plot_file = os.path.join(PF_path,'Plots/%s_vs_default.pdf' %(plot_name))
+    print(plot_file)
+    plt.savefig(plot_file, bbox_inches = 'tight', pad_inches = 1)
+    if display_plot:
+        plt.show()
+    plt.close(fig)
+
 
 def plot_policy(T, S, w_map, policy, Funds, G):
     F = {a:i for (i,a) in enumerate(Funds)}
@@ -626,7 +640,7 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
     policy_colors = np.vstack((col.to_rgb('black') , policy_colors))
     actions_str = [str(pc) for pc in actions]
     F = {a:i for (i,a) in enumerate(actions_str)}
-    U_plot = np.array([[F[str(policy[t,w_map(s)])] for t in range(T)] for s in S if s<=G*1.5])
+    U_plot = np.array([[F[str(policy[t,w_map(s)])] for t in range(T)] for s in S if s<=330000])
     U_plot[w_map(G)-10:w_map(G)+10,:] = -1 #Draw G
     #Draw simulation 5-95%
     U_plot2 = np.copy(U_plot)
@@ -641,7 +655,7 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
         
 
     cmap = colors.ListedColormap(policy_colors)
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=300)
+    fig, ax = plt.subplots(figsize=(7,7), dpi=100)
     steps_displayed = len(U_plot)
     im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(actions)-1)
     im2 = ax.imshow(U_plot2, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=-1, vmax=len(actions)-1, alpha=0.8)
@@ -654,20 +668,22 @@ def plot_policy_and_sim2(T, S, w_map, policy, funds ,actions, G, sim_results,plo
     # colormap used by imshow
     #values = [F[a] for a in funds]
     cols = basic_cols#[ im.cmap(im.norm(value)) for value in values]
-    patches = [ mpatches.Patch(color=cols[i], label="Fund {l}".format(l=funds[i]) ) for i in range(len(funds)) ]
+    patches = [ mpatches.Patch(color=cols[i], label=r"Fund {l}".format(l=funds[i]) ) for i in range(len(funds)) ]
     #if plot_name == 'Default':
-    ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0.5 )
+    ax.legend(handles=patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=1.0 )
     #fig.colorbar(im)
-    ax.set_xlabel('Years')
-    ax.set_ylabel('Wealth (\$USD)')
+    ax.set_xlabel(r'Years')
+    ax.set_ylabel(r'Wealth (\$USD)')
     plt.tight_layout() 
-    plot_file = os.path.join(PF_path,'Plots/%s.pdf' %(plot_name) )
-    #plt.savefig(plot_file, bbox_inches = 'tight', pad_inches = 1)
-    pp = PdfPages(plot_file)
-    pp.savefig(fig)
-    pp.close()
     if display_plot:
         plt.show()
+    plot_file = os.path.join(PF_path,'Plots/%s.pdf' %(plot_name) )
+    plt.savefig(plot_file, bbox_inches = 'tight', pad_inches = 1)
+    #pp = PdfPages(plot_file)
+    #pp.savefig(fig)
+    #pp.close()
+    
+    plt.close(fig)
     
 
 # scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
@@ -733,7 +749,7 @@ def get_investment_profiles(sim_result, policy, w_map, T, A, funds,  quantiles=[
     F = {a:i for (i,a) in enumerate(actions_str)}
     U_plot = np.array([[F[str(policy[t,w_map(wealth_profiles[i,t])])] for t in range(T)] for (i,q) in enumerate(quantiles)])
     cmap = colors.ListedColormap(policy_colors)
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots( dpi = 100)
     steps_displayed = len(U_plot)
     im = ax.imshow(U_plot, cmap=cmap,  interpolation='none', aspect=T/steps_displayed ,origin='lower', vmin=0, vmax=len(A)-1)
      # We want to show all ticks...
@@ -790,7 +806,7 @@ def run_default(setup_params, dp_data, r, sim_returns, plot=False):
     T, R, rf, df, I0, c, w, G, w_delta, max_wealth = setup_params  
     S, A, F, w_map, steps  = dp_data
     def_pol = create_default_policy(T,w_delta,max_wealth)
-    Default_sim_results = simulation(setup_params,def_pol,w_map,sim_returns, policy_name="%10s" %("Default"))
+    Default_sim_results, _ = simulation(setup_params,def_pol,w_map,sim_returns, policy_name="%10s" %("Default"))
     #plot_simulation(Default_sim_results, def_pol, style=1)
     if plot:
         plot_policy_and_sim2(T ,S, w_map,  def_pol, Funds, A, G, Default_sim_results, 'Default')
@@ -889,7 +905,7 @@ if __name__ == '__main__':
         dp_out = backward_induction_sd_mix_par(problem_params, dp_data, r, Y,default_policy, method=m, method_params = alg_params , method_cond=False, n_threads=3)
         V,U = dp_out
         w_map = setup_data[3]
-        DP_sim_results = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
+        DP_sim_results, _ = simulation(T,U,w_map,simulated_returns,I0,c, replicas , policy_name="%10s" %(m))
         sols_DP[m] = (dp_out, DP_sim_results)
     
     S, A, F, w_map, steps = setup_data 
@@ -901,24 +917,38 @@ if __name__ == '__main__':
     #Read solution 
     if False:
         PF_path = '/Users/dduque/MacWorkspace/PorfolioOpt/PensionFunds/'
-        out_path = os.path.join(PF_path, 'ssd_tail_0.000_1.000_0.00.pickle')
-        read_out = pickle.load(open(out_path, 'rb')) 
-        S, A, F, T,r,w_delta,max_wealth ,simulated_returns, sols_DP = read_out
-        methods_dp = sols_DP.keys()
-        w_map = w_index(w_delta, max_wealth,len(S))
-        #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
-        #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/*.pickle ./PensionFunds/
-        for m in methods_dp:
-            dp_out, DP_sim_results = sols_DP[m]
-            
-            if m != 'Default':
-                V,U = dp_out
-                sim_out = simulation(problem_params,U,w_map,simulated_returns, policy_name=m)
-                #plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results, m, display_plot=True)
-                #plot_policies_comparizon(('Default', sols_DP['Default'][1]),(m, DP_sim_results), G)
+        method_file = 'ssd_tail_r_0.0000_1.100_0.00'
+        out_path = os.path.join(PF_path, '%s.pickle' %method_file)
         
-        
-        #get_investment_profiles(DP_sim_results, U, w_map,T,A, Funds)
+        paper_plots = ['utility_sigmoidal_0.9900_9.000_6.00',
+                       'cvar_l_0.0000_0.200_0.00',
+                       'cvar_q_0.0001_0.100_0.00' ,     
+                       'ssd_0.0000_0.500_0.00',
+                       'ssd_minmax_0.0000_0.500_0.00',
+                       'ssd_tail_0.0000_1.000_0.00',
+                       'ssd_tail_r_0.0000_1.000_0.00',
+                       'utility_power_7.6000_0.000_0.00',]
+
+        PF_path_HD = '/Volumes/DDV_backup/DP_PF_results/'
+        for method_file in paper_plots:
+            out_path = os.path.join(PF_path_HD, '%s.pickle' %(method_file))
+            read_out = pickle.load(open(out_path, 'rb')) 
+            S, A, F, T,r,w_delta,max_wealth ,simulated_returns, sols_DP = read_out
+            methods_dp = sols_DP.keys()
+            w_map = w_index(w_delta, max_wealth,len(S))
+            #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/Plots/*.pdf ./PensionFunds/Plots/
+            #scp dduque@crunch.osl.northwestern.edu:/home/dduque/dduque_projects/PorfolioOpt/PensionFunds/*.pickle ./PensionFunds/
+            for m in methods_dp:
+                dp_out, DP_sim_results = sols_DP[m]
+                
+                if m != 'Default':
+                    V,U = dp_out
+                    #sim_out, _ = simulation(problem_params,U,w_map,simulated_returns, policy_name=m)
+                    plot_policy_and_sim2(T ,S, w_map, U, F, A, G, DP_sim_results,method_file, display_plot= True)
+                    plot_policies_comparizon(('Default', def_sim),(m, DP_sim_results), G,method_file , True )
+                    get_investment_profiles(DP_sim_results, U, w_map,T,A, F)
+
+
 #    for t in range(T):
 #        plt.plot(V[t,:])
 #    for a in Funds:
@@ -930,7 +960,8 @@ if __name__ == '__main__':
 
 
 if False:
-    dp_name = ALG_UTILITY
+    def_sim = sols_DP['Default'][1]
+    dp_name = ALG_CVAR_PENALTY_LIN
     
         
     def_wealth = np.array([sols_DP['Default'][1][k][-1] for k in range(len(sols_DP['Default'][1]))])
